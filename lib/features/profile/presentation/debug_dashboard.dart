@@ -48,6 +48,7 @@ class DebugDashboard extends StatelessWidget {
             _row('CLEANED CMD', state.cleanedCmd),
             _row('CREATE_LINK REQ', state.requestPayload),
             _row('RAW RESPONSE', state.rawResponse),
+            _row('REDIRECTS', state.redirects),
             _row('RESOLVED URL', state.resolvedUrl),
             _row('PLAYER HEADERS', state.playerHeaders),
             _row('LAST ERROR', state.lastError),
@@ -112,6 +113,7 @@ ORIGINAL CMD: ${state.cmd}
 CLEANED CMD: ${state.cleanedCmd}
 CREATE_LINK REQUEST: ${state.requestPayload}
 RAW RESPONSE: ${state.rawResponse}
+REDIRECTS: ${state.redirects}
 RESOLVED URL: ${state.resolvedUrl}
 PLAYER HEADERS: ${state.playerHeaders}
 LAST ERROR: ${state.lastError}''';

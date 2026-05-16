@@ -58,13 +58,9 @@ class PosterResolver {
 }
 
 class UrlNormalizer {
-  /// Comprehensive normalization: strips directives and resolves localhost.
+  /// Basic normalization for legacy components. Just strips player directives.
   static String normalize(String url, String? portalUrl) {
-    url = stripPlayerDirectives(url);
-    if (url.contains('localhost') && portalUrl != null) {
-      url = resolveLocalhost(url, portalUrl);
-    }
-    return url;
+    return stripPlayerDirectives(url);
   }
 
   /// Stalker portals often return a `cmd` meant for their proprietary STB player.
@@ -101,18 +97,5 @@ class UrlNormalizer {
     }
 
     return url.trim();
-  }
-
-  /// Requirement 4: If portal returns localhost, resolve against portal domain.
-  static String resolveLocalhost(String url, String portalUrl) {
-    try {
-      final portalUri = Uri.parse(portalUrl);
-      final portalHost = portalUri.host;
-      if (portalHost.isEmpty) return url;
-      
-      return url.replaceAll('localhost', portalHost);
-    } catch (_) {
-      return url;
-    }
   }
 }

@@ -356,15 +356,7 @@ class StalkerApiService {
     // Diagnostic: Capture starting state
     _logger.debugState.selectedContent = 'Type: $type | Cmd: $cmd';
     _logger.debugState.cmd = cmd;
-
-    final cleanedDirectUrl = UrlNormalizer.normalize(cmd, _client.portalUrl);
-    _logger.debugState.cleanedCmd = cleanedDirectUrl;
-
-    if (cleanedDirectUrl.startsWith('http://') || cleanedDirectUrl.startsWith('https://')) {
-      _logger.mag('CREATE_LINK_BYPASS', 'Using direct URL: $cleanedDirectUrl');
-      _logger.debugState.resolvedUrl = cleanedDirectUrl;
-      return cleanedDirectUrl;
-    }
+    _logger.debugState.cleanedCmd = UrlNormalizer.stripPlayerDirectives(cmd);
 
     final params = {
       'cmd': cmd,
@@ -413,7 +405,53 @@ class StalkerApiService {
       throw PortalException(message: 'Server error: $errorCode');
     }
 
-    streamUrl = UrlNormalizer.normalize(streamUrl, _client.portalUrl);
+    streamUrl = UrlNormalizer.stripPlayerDirectives(streamUrl);
+
+    // If it's an internal portal URL (e.g. localhost proxy), we MUST resolve it through our authenticated session.
+    if (streamUrl.contains('localhost') || streamUrl.contains('127.0.0.1')) {
+      final portalUri = Uri.tryParse(_client.portalUrl ?? '');
+      if (portalUri != null) {
+        streamUrl = streamUrl.replaceAll('localhost', portalUri.host).replaceAll('127.0.0.1', portalUri.host);
+      }
+      
+      _logger.mag('RESOLVE_STREAM', 'Resolving internal stream via authenticated session: $streamUrl');
+      _logger.debugState.redirects = 'Starting manual resolution for: $streamUrl\n';
+      
+      int redirectCount = 0;
+      while (redirectCount < 5) {
+        try {
+          final response = await _client.dio.get(
+            streamUrl,
+            options: Options(
+              followRedirects: false, // We must trace redirects manually
+              validateStatus: (status) => status != null && status < 500,
+              responseType: ResponseType.stream,
+            ),
+          );
+
+          _logger.debugState.redirects += '[$redirectCount] HTTP ${response.statusCode} - $streamUrl\n';
+
+          if (response.statusCode == 301 || response.statusCode == 302 || response.statusCode == 303 || response.statusCode == 307 || response.statusCode == 308) {
+            final location = response.headers.value('location');
+            response.data?.close(); // Release connection
+            if (location != null && location.isNotEmpty) {
+              _logger.mag('RESOLVE_STREAM', 'Got redirect -> $location');
+              streamUrl = location;
+              redirectCount++;
+              continue;
+            }
+          }
+
+          // Not a redirect, so this is the final URL
+          response.data?.close();
+          break;
+        } catch (e) {
+          _logger.e('RESOLVE_STREAM', 'Resolution failed', error: e);
+          _logger.debugState.redirects += 'Resolution failed: $e\n';
+          break; // Fallback to whatever URL we got so far
+        }
+      }
+    }
 
     if (streamUrl.isEmpty) {
       throw const PortalException(

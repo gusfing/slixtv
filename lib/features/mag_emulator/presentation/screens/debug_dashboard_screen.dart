@@ -81,6 +81,7 @@ class _DebugDashboardScreenState extends State<DebugDashboardScreen> {
           _buildSection('Selected Item', state.selectedContent.isEmpty ? 'None' : state.selectedContent),
           _buildSection('create_link Request', state.requestPayload.isEmpty ? 'None' : state.requestPayload),
           _buildSection('Raw Response', state.rawResponse.isEmpty ? 'None' : state.rawResponse),
+          _buildSection('Redirects', state.redirects.isEmpty ? 'None' : state.redirects),
           _buildSection('Final Stream URL', state.resolvedUrl.isEmpty ? 'None' : state.resolvedUrl),
           _buildSection('Player Headers', state.playerHeaders.isEmpty ? 'None' : state.playerHeaders),
           if (state.lastError.isNotEmpty)

@@ -13,6 +13,7 @@ class DebugState {
   String cmd = ''; // Original command
   String cleanedCmd = ''; // Command after stripping ffrt, ffmpeg, auto
   String resolvedUrl = ''; // Final stream URL
+  String redirects = ''; // Raw redirect trace
   String playerHeaders = ''; // Headers passed to the player
   String lastError = ''; // Last exception message
 }
