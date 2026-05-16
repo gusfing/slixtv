@@ -208,12 +208,26 @@ class SeriesService {
     _logger.mag('CREATE_SERIES_LINK_REQ', 'initial cmd: $extractedCmd | series_id: $seriesId | ep_id: $episodeId');
     
     // Fallback engine: Try multiple variations of the payload until the portal returns a valid stream.
-    final fallbacks = [
+    final fallbacks = <Map<String, String>>[];
+
+    // If cmd already looks like a raw STB stream (e.g., ffmpeg http://...), use Live TV payload!
+    if (extractedCmd.contains('ffmpeg') || extractedCmd.contains('ffrt') || extractedCmd.contains('auto')) {
+      fallbacks.add({
+        'cmd': extractedCmd,
+        'series': seriesId,
+        'forced_storage': '0',
+        'disable_ad': '0',
+        'volume': '100',
+        'play_mode': '0',
+      });
+    }
+
+    fallbacks.addAll([
       {'cmd': extractedCmd, 'series': seriesId, 'forced_storage': '0', 'disable_ad': '0'},
       {'cmd': 'ffmpeg $extractedCmd', 'series': seriesId, 'forced_storage': '0', 'disable_ad': '0'},
       {'cmd': extractedCmd.startsWith('/media/') ? '${_client.portalUrl}$extractedCmd' : extractedCmd, 'series': seriesId},
       {'cmd': extractedCmd}, // Strict fallback without series_id
-    ];
+    ]);
 
     String? lastErrorMsg;
 

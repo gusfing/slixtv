@@ -51,7 +51,7 @@ class VodItem {
           _nonNull(json['o_name']) ??
           '',
       poster: poster,
-      cmd: json['cmd']?.toString() ?? json['video_url']?.toString() ?? '',
+      cmd: StalkerParser.extractBestPlaybackCmd(json, null) ?? '',
       categoryId: json['category_id']?.toString() ?? '',
       year: _nonNull(json['year']) ?? '',
       rating: _nonNull(json['rating_imdb'])?.toString() ??

@@ -158,12 +158,26 @@ class MoviesService {
     _logger.mag('CREATE_VOD_LINK_REQ', 'initial cmd: $extractedCmd | movie_id: $movieId');
     
     // Fallback engine: Try multiple variations of the payload until the portal returns a valid stream.
-    final fallbacks = [
+    final fallbacks = <Map<String, String>>[];
+
+    // If cmd already looks like a raw STB stream (e.g., ffmpeg http://...), use Live TV payload!
+    if (extractedCmd.contains('ffmpeg') || extractedCmd.contains('ffrt') || extractedCmd.contains('auto')) {
+      fallbacks.add({
+        'cmd': extractedCmd,
+        'series': '',
+        'forced_storage': '0',
+        'disable_ad': '0',
+        'volume': '100',
+        'play_mode': '0',
+      });
+    }
+
+    fallbacks.addAll([
       {'cmd': extractedCmd, 'movie_id': movieId, 'forced_storage': '0', 'disable_ad': '1'},
       {'cmd': 'ffmpeg $extractedCmd', 'movie_id': movieId, 'forced_storage': '0', 'disable_ad': '1'},
       {'cmd': extractedCmd.startsWith('/media/') ? '${_client.portalUrl}$extractedCmd' : extractedCmd, 'movie_id': movieId},
       {'cmd': extractedCmd}, // Strict fallback without movie_id
-    ];
+    ]);
 
     String? lastErrorMsg;
 

@@ -35,42 +35,62 @@ class StalkerParser {
   /// 4. Alternate fields: ffmpeg_cmd, stream_url, play_url, file, url
   static String? extractBestPlaybackCmd(dynamic orderedItem, dynamic infoResponse) {
     String? bestCmd;
+    String orderedListCmd = '';
+    String infoCmd = '';
+    String filesCmd = '';
 
-    void checkMap(Map map) {
-      if (bestCmd != null && bestCmd!.isNotEmpty) return;
-      final fields = ['cmd', 'ffmpeg_cmd', 'stream_url', 'play_url', 'url', 'file', 'video_url'];
+    String? checkMap(Map map) {
+      final fields = ['cmd', 'ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'url', 'file', 'video_url'];
       for (final f in fields) {
         final val = map[f]?.toString();
         if (val != null && val.isNotEmpty) {
-          bestCmd = val;
-          return;
+          return val;
         }
       }
+      return null;
     }
 
     // 1. Check ordered list item
-    if (orderedItem is Map) checkMap(orderedItem);
+    if (orderedItem is Map) {
+      orderedListCmd = checkMap(orderedItem) ?? '';
+      if (orderedListCmd.isNotEmpty) bestCmd = orderedListCmd;
+    }
 
     if (infoResponse != null && infoResponse is Map) {
       dynamic js = infoResponse['js'];
       if (js != null && js is Map) {
         // 2. Check root of get_info 'js'
-        checkMap(js);
+        infoCmd = checkMap(js) ?? '';
+        if (bestCmd == null && infoCmd.isNotEmpty) bestCmd = infoCmd;
 
         // 3. Check 'info' map inside 'js'
-        if (js['info'] is Map) {
-          checkMap(js['info']);
+        if (infoCmd.isEmpty && js['info'] is Map) {
+          infoCmd = checkMap(js['info']) ?? '';
+          if (bestCmd == null && infoCmd.isNotEmpty) bestCmd = infoCmd;
         }
 
         // 4. Check 'files' array inside 'js'
         if (js['files'] != null) {
           final filesList = extractList(js['files']);
           if (filesList.isNotEmpty && filesList.first is Map) {
-            checkMap(filesList.first);
+            filesCmd = checkMap(filesList.first) ?? '';
+            if (bestCmd == null && filesCmd.isNotEmpty) bestCmd = filesCmd;
           }
         }
       }
     }
+
+    // Capture extraction diagnostics
+    final logMap = {
+      'orderedListCmd': orderedListCmd,
+      'infoCmd': infoCmd,
+      'filesCmd': filesCmd,
+      'chosenCmd': bestCmd ?? '',
+    };
+    
+    // Using a simple print for console, but ideally this should be tied to AppLogger
+    // if StalkerParser has access to it.
+    print('CMD_EXTRACTION_DIAGNOSTICS: $logMap');
 
     return bestCmd;
   }
