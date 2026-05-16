@@ -217,4 +217,190 @@ class MoviesService {
     final s = v.toString();
     return s.isEmpty || s == 'null' ? null : s;
   }
+
+  /// VOD-specific create_link engine.
+  /// Unlike Live TV, VOD ordered_list returns /media/*.mpg which is just an
+  /// identifier — NOT a real STB stream cmd. We must send it to create_link
+  /// with various payload combinations until the portal returns a real URL.
+  Future<String> createVodLink(String cmd, String movieId) async {
+    _logger.mag('CREATE_VOD_LINK_START', 'movieId=$movieId cmd=$cmd');
+    _logger.debugState.selectedContent = 'VOD: $movieId | cmd: $cmd';
+    _logger.debugState.cmd = cmd;
+
+    final ffmpegCmd = cmd.startsWith('ffmpeg ') ? cmd : 'ffmpeg $cmd';
+
+    // 5 attempts — exactly as specified, in strict order
+    final attempts = <Map<String, String>>[
+      // Attempt 1: with movie_id and download flag
+      {
+        'cmd': cmd,
+        'movie_id': movieId,
+        'download': '0',
+        'JsHttpRequest': '1-xml',
+      },
+      // Attempt 2: ffmpeg-wrapped cmd with movie_id
+      {
+        'cmd': ffmpegCmd,
+        'movie_id': movieId,
+        'download': '0',
+      },
+      // Attempt 3: no cmd at all — just movie_id (some portals ignore cmd)
+      {
+        'movie_id': movieId,
+        'download': '0',
+      },
+      // Attempt 4: full legacy VOD payload
+      {
+        'cmd': cmd,
+        'movie_id': movieId,
+        'forced_storage': '0',
+        'disable_ad': '1',
+        'download': '0',
+        'force_ch_link_check': '0',
+      },
+      // Attempt 5: Live TV-style payload — in case this provider treats VOD like ITV
+      {
+        'cmd': cmd,
+        'series': '',
+        'forced_storage': '0',
+        'disable_ad': '0',
+        'volume': '100',
+        'play_mode': '0',
+      },
+    ];
+
+    String? lastError;
+
+    for (int i = 0; i < attempts.length; i++) {
+      final payload = attempts[i];
+      _logger.mag('CREATE_VOD_ATTEMPT', 'attempt=${i + 1} payload=$payload');
+      _logger.debugState.requestPayload = payload.toString();
+
+      try {
+        final response = await _stalkerRequest(
+          action: AppConfig.stalkerCreateLinkAction,
+          extraParams: payload,
+        );
+
+        final js = response['js'];
+        _logger.mag('CREATE_VOD_RAW', 'attempt=${i + 1} js=$js');
+        _logger.debugState.rawResponse = js?.toString() ?? 'null';
+
+        if (js == null || js == false) {
+          lastError = 'js=null/false';
+          continue;
+        }
+
+        String streamUrl = '';
+        String errorCode = '';
+
+        if (js is Map<String, dynamic>) {
+          streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
+          errorCode = js['error']?.toString() ?? '';
+        } else if (js is String) {
+          streamUrl = js;
+        }
+
+        _logger.mag('CREATE_VOD_PARSED', 'attempt=${i + 1} streamUrl=$streamUrl error=$errorCode');
+
+        // Reject bad responses
+        if (errorCode == 'nothing_to_play') {
+          lastError = 'nothing_to_play';
+          continue;
+        }
+        if (streamUrl.isEmpty || streamUrl.startsWith('/media/')) {
+          lastError = 'unresolvable url: $streamUrl';
+          continue;
+        }
+
+        // Got something — resolve internal proxy if needed
+        return await _resolveStreamUrl(streamUrl, movieId);
+
+      } catch (e) {
+        lastError = e.toString();
+        _logger.debugState.lastError = lastError;
+        continue;
+      }
+    }
+
+    // All 5 attempts failed
+    _logger.mag('CREATE_VOD_FAILED', 'movieId=$movieId lastError=$lastError');
+    throw PortalException(
+      message: 'Could not resolve stream after 5 attempts. Last error: $lastError'
+    );
+  }
+
+  /// Resolves internal/localhost stream URLs using the authenticated Dio session,
+  /// tracing redirects manually — same as the Live TV engine.
+  Future<String> _resolveStreamUrl(String streamUrl, String movieId) async {
+    // Strip player directives (ffmpeg, ffrt, etc.)
+    String url = streamUrl.trim();
+    const prefixes = ['ffmpeg ', 'ffrt3 ', 'ffrt ', 'auto '];
+    for (final p in prefixes) {
+      if (url.toLowerCase().startsWith(p.toLowerCase())) {
+        url = url.substring(p.length).trim();
+        break;
+      }
+    }
+    final httpIdx = url.indexOf('http');
+    if (httpIdx > 0 && !url.substring(0, httpIdx).contains('://')) {
+      url = url.substring(httpIdx);
+    }
+
+    _logger.debugState.cleanedCmd = url;
+
+    // Resolve internal proxy (localhost → real portal host)
+    if (url.contains('localhost') || url.contains('127.0.0.1')) {
+      final portalUri = Uri.tryParse(_client.portalUrl ?? '');
+      if (portalUri != null) {
+        url = url
+            .replaceAll('localhost', portalUri.host)
+            .replaceAll('127.0.0.1', portalUri.host);
+      }
+
+      _logger.mag('RESOLVE_VOD_STREAM', 'movieId=$movieId resolving: $url');
+      _logger.debugState.redirects = 'Resolving: $url\n';
+
+      int redirects = 0;
+      while (redirects < 5) {
+        try {
+          final resp = await _client.dio.get(
+            url,
+            options: Options(
+              followRedirects: false,
+              validateStatus: (s) => s != null && s < 500,
+              responseType: ResponseType.stream,
+            ),
+          );
+
+          _logger.debugState.redirects += '[${redirects}] HTTP ${resp.statusCode} - $url\n';
+
+          final status = resp.statusCode ?? 0;
+          if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+            final location = resp.headers.value('location');
+            resp.data?.close();
+            if (location != null && location.isNotEmpty) {
+              url = location;
+              redirects++;
+              continue;
+            }
+          }
+          resp.data?.close();
+          break;
+        } catch (e) {
+          _logger.e('RESOLVE_VOD_STREAM', 'redirect trace failed', error: e);
+          _logger.debugState.redirects += 'Error: $e\n';
+          break;
+        }
+      }
+    }
+
+    if (url.isEmpty) {
+      throw const PortalException(message: 'Resolved stream URL is empty');
+    }
+
+    _logger.debugState.resolvedUrl = url;
+    _logger.mag('CREATE_VOD_FINAL', 'movieId=$movieId finalUrl=$url');
+    return url;
+  }
 }

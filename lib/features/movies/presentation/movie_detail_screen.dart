@@ -35,11 +35,8 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
     setState(() { _isLoadingStream = true; _streamError = null; });
 
     try {
-      final stalkerApi = ref.read(stalkerApiProvider);
-      final streamUrl = await stalkerApi.createLink(
-        movie.cmd,
-        AppConfig.typeVod,
-      );
+      final moviesService = ref.read(moviesServiceProvider);
+      final streamUrl = await moviesService.createVodLink(movie.cmd, movie.id);
 
       if (!mounted) return;
       setState(() => _isLoadingStream = false);
