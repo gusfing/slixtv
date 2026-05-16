@@ -1,0 +1,66 @@
+name: slix_iptv
+description: "Premium IPTV streaming application with Netflix-like UI and MAG/Stalker portal support"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+
+  # Routing
+  go_router: ^14.8.1
+
+  # Networking
+  dio: ^5.8.0+1
+  dio_cookie_manager: ^3.1.1
+  cookie_jar: ^4.0.8
+
+  # Storage
+  flutter_secure_storage: ^10.2.0
+  shared_preferences: ^2.5.3
+  path_provider: ^2.1.5
+
+  # Player
+  video_player: ^2.9.5
+  chewie: ^1.8.5
+
+  # UI
+  cached_network_image: ^3.4.1
+  shimmer: ^3.0.0
+  google_fonts: ^6.2.1
+  animate_do: ^3.3.4
+
+  # Utils
+  intl: ^0.19.0
+  connectivity_plus: ^6.1.4
+  device_info_plus: ^11.3.3
+  package_info_plus: ^8.2.1
+  share_plus: ^10.1.4
+
+  # Logging
+  logger: ^2.5.0
+  xml: ^6.6.1
+  html: ^0.15.6
+  uuid: ^4.5.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  mockito: ^5.6.4
+  build_runner: ^2.15.0
+  http_mock_adapter: ^0.6.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
