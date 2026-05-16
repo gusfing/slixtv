@@ -25,6 +25,55 @@ class StalkerParser {
     
     return [];
   }
+
+  /// Extracts the most STB-compatible playback command from a combination of the
+  /// item's list data (ordered_list) and its detailed info response (get_info).
+  /// Priorities:
+  /// 1. orderedItem['cmd']
+  /// 2. infoResponse['js']['cmd']
+  /// 3. infoResponse['js']['files'][0]['cmd']
+  /// 4. Alternate fields: ffmpeg_cmd, stream_url, play_url, file, url
+  static String? extractBestPlaybackCmd(dynamic orderedItem, dynamic infoResponse) {
+    String? bestCmd;
+
+    void checkMap(Map map) {
+      if (bestCmd != null && bestCmd!.isNotEmpty) return;
+      final fields = ['cmd', 'ffmpeg_cmd', 'stream_url', 'play_url', 'url', 'file', 'video_url'];
+      for (final f in fields) {
+        final val = map[f]?.toString();
+        if (val != null && val.isNotEmpty) {
+          bestCmd = val;
+          return;
+        }
+      }
+    }
+
+    // 1. Check ordered list item
+    if (orderedItem is Map) checkMap(orderedItem);
+
+    if (infoResponse != null && infoResponse is Map) {
+      dynamic js = infoResponse['js'];
+      if (js != null && js is Map) {
+        // 2. Check root of get_info 'js'
+        checkMap(js);
+
+        // 3. Check 'info' map inside 'js'
+        if (js['info'] is Map) {
+          checkMap(js['info']);
+        }
+
+        // 4. Check 'files' array inside 'js'
+        if (js['files'] != null) {
+          final filesList = extractList(js['files']);
+          if (filesList.isNotEmpty && filesList.first is Map) {
+            checkMap(filesList.first);
+          }
+        }
+      }
+    }
+
+    return bestCmd;
+  }
 }
 
 class PosterResolver {

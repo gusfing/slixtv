@@ -85,9 +85,14 @@ class Episode {
     this.description = '',
   });
 
-  factory Episode.fromJson(Map<String, dynamic> json, int index, ApiClient client) {
+  factory Episode.fromJson(Map<String, dynamic> json, int index, ApiClient client, {String? seriesCmd}) {
     final poster = PosterResolver.resolve(json, client);
-    final cmd = json['cmd']?.toString() ?? json['video_url']?.toString() ?? '';
+    
+    // Utilize the robust extractor for the episode object itself
+    String cmd = StalkerParser.extractBestPlaybackCmd(json, null) ?? '';
+    if (cmd.isEmpty && seriesCmd != null && seriesCmd.isNotEmpty) {
+      cmd = seriesCmd;
+    }
 
     return Episode(
       id: json['id']?.toString() ?? index.toString(),

@@ -306,10 +306,10 @@ final streamUrlProvider = FutureProvider.family<String, ({String cmd, String typ
 });
 
 // VOD item detailed info (synopsis, cast, etc.)
-final vodInfoProvider = FutureProvider.family<vod_models.VodItem?, String>((ref, movieId) async {
+final vodInfoProvider = FutureProvider.family<vod_models.VodItem?, vod_models.VodItem>((ref, item) async {
   final authState = ref.watch(authProvider);
   if (authState.status != AuthStatus.authenticated) return null;
-  return ref.watch(moviesServiceProvider).getVodInfo(movieId);
+  return ref.watch(moviesServiceProvider).getVodInfo(item);
 });
 
 // ─── Favorites ─────────────────────────────────────────────

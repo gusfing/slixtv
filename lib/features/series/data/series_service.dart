@@ -130,6 +130,11 @@ class SeriesService {
       final js = response['js'];
       if (js == null || js == false) return [];
 
+      String? seriesCmd;
+      if (js is Map<String, dynamic>) {
+        seriesCmd = js['cmd']?.toString();
+      }
+
       final seasons = <Season>[];
       final flatEpisodes = <Episode>[];
 
@@ -138,7 +143,7 @@ class SeriesService {
         for (int i = 0; i < eps.length; i++) {
           final ep = eps[i];
           if (ep is Map<String, dynamic>) {
-            parsedEps.add(Episode.fromJson(ep, i, _client));
+            parsedEps.add(Episode.fromJson(ep, i, _client, seriesCmd: seriesCmd));
           }
         }
         if (parsedEps.isNotEmpty) {
@@ -155,7 +160,7 @@ class SeriesService {
       if (js is List) {
         for (int i = 0; i < js.length; i++) {
           if (js[i] is Map<String, dynamic>) {
-            flatEpisodes.add(Episode.fromJson(js[i], flatEpisodes.length, _client));
+            flatEpisodes.add(Episode.fromJson(js[i], flatEpisodes.length, _client, seriesCmd: seriesCmd));
           }
         }
       }
@@ -173,7 +178,7 @@ class SeriesService {
               if (seriesSub is List) {
                 processEpisodeList(seriesSub, item['name']?.toString() ?? 'Season ${i + 1}', i + 1);
               } else {
-                flatEpisodes.add(Episode.fromJson(item, flatEpisodes.length, _client));
+                flatEpisodes.add(Episode.fromJson(item, flatEpisodes.length, _client, seriesCmd: seriesCmd));
               }
             }
           }
@@ -198,76 +203,119 @@ class SeriesService {
     return [];
   }
 
-  /// Exact create_link logic with explicit logging to nail down "nothing_to_play" errors for Series.
-  Future<String> createSeriesLink(String cmd, String seriesId, String episodeId) async {
-    _logger.mag('CREATE_SERIES_LINK_REQ', 'cmd: $cmd | series_id: $seriesId | ep_id: $episodeId');
+  /// Exact create_link logic with fallback payloads and internal redirect proxying
+  Future<String> createSeriesLink(String extractedCmd, String seriesId, String episodeId) async {
+    _logger.mag('CREATE_SERIES_LINK_REQ', 'initial cmd: $extractedCmd | series_id: $seriesId | ep_id: $episodeId');
     
-    // Diagnostic: Capture starting state
-    _logger.debugState.selectedContent = 'Series: $seriesId | Ep: $episodeId | Cmd: $cmd';
-    _logger.debugState.cmd = cmd;
+    // Fallback engine: Try multiple variations of the payload until the portal returns a valid stream.
+    final fallbacks = [
+      {'cmd': extractedCmd, 'series': seriesId, 'forced_storage': '0', 'disable_ad': '0'},
+      {'cmd': 'ffmpeg $extractedCmd', 'series': seriesId, 'forced_storage': '0', 'disable_ad': '0'},
+      {'cmd': extractedCmd.startsWith('/media/') ? '${_client.portalUrl}$extractedCmd' : extractedCmd, 'series': seriesId},
+      {'cmd': extractedCmd}, // Strict fallback without series_id
+    ];
 
-    final cleanedDirectUrl = UrlNormalizer.normalize(cmd, _client.portalUrl);
-    _logger.debugState.cleanedCmd = cleanedDirectUrl;
+    String? lastErrorMsg;
 
-    if (cleanedDirectUrl.startsWith('http://') || cleanedDirectUrl.startsWith('https://')) {
-      _logger.mag('CREATE_SERIES_LINK_BYPASS', 'Using direct URL: $cleanedDirectUrl');
-      _logger.debugState.resolvedUrl = cleanedDirectUrl;
-      return cleanedDirectUrl;
+    for (int i = 0; i < fallbacks.length; i++) {
+      final payload = fallbacks[i];
+      _logger.debugState.selectedContent = 'Series: $seriesId | Ep: $episodeId | Attempt: ${i + 1}';
+      _logger.debugState.cmd = payload['cmd'] ?? '';
+      _logger.debugState.cleanedCmd = UrlNormalizer.stripPlayerDirectives(payload['cmd'] ?? '');
+      _logger.debugState.requestPayload = payload.toString();
+
+      _logger.mag('CREATE_SERIES_ATTEMPT', 'Attempt ${i + 1}: $payload');
+
+      try {
+        final response = await _stalkerRequest(
+          action: AppConfig.stalkerCreateLinkAction,
+          extraParams: payload,
+        );
+
+        final js = response['js'];
+        _logger.debugState.rawResponse = js?.toString() ?? 'null';
+
+        if (js == null || js == false) continue;
+
+        String streamUrl = '';
+        String errorCode = '';
+
+        if (js is Map<String, dynamic>) {
+          streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
+          errorCode = js['error']?.toString() ?? '';
+        } else if (js is String) {
+          streamUrl = js;
+        }
+
+        if (errorCode == 'nothing_to_play' || streamUrl.isEmpty) {
+          lastErrorMsg = errorCode;
+          continue; // Try next fallback
+        }
+
+        // We got a stream! Resolve it if it's an internal proxy.
+        return await _resolveStream(streamUrl);
+      } catch (e) {
+        lastErrorMsg = e.toString();
+        _logger.debugState.lastError = lastErrorMsg;
+        continue;
+      }
     }
 
-    final params = {
-      'cmd': cmd,
-      'series': seriesId,
-      'forced_storage': '0',
-      'disable_ad': '0',
-    };
-    _logger.debugState.requestPayload = params.toString();
+    throw PortalException(message: 'Could not resolve a valid stream URL after all fallbacks. Last error: $lastErrorMsg');
+  }
 
-    Map<String, dynamic> response;
-    try {
-      response = await _stalkerRequest(
-        action: AppConfig.stalkerCreateLinkAction,
-        extraParams: params,
-      );
-    } catch (e) {
-      _logger.debugState.lastError = e.toString();
-      throw PortalException(message: 'Stream request failed: $e');
+  Future<String> _resolveStream(String streamUrl) async {
+    String finalStreamUrl = UrlNormalizer.stripPlayerDirectives(streamUrl);
+
+    if (finalStreamUrl.contains('localhost') || finalStreamUrl.contains('127.0.0.1')) {
+      final portalUri = Uri.tryParse(_client.portalUrl ?? '');
+      if (portalUri != null) {
+        finalStreamUrl = finalStreamUrl.replaceAll('localhost', portalUri.host).replaceAll('127.0.0.1', portalUri.host);
+      }
+      
+      _logger.mag('RESOLVE_SERIES_STREAM', 'Resolving internal stream: $finalStreamUrl');
+      _logger.debugState.redirects = 'Starting manual Series resolution for: $finalStreamUrl\n';
+      
+      int redirectCount = 0;
+      while (redirectCount < 5) {
+        try {
+          final response = await _client.dio.get(
+            finalStreamUrl,
+            options: Options(
+              followRedirects: false,
+              validateStatus: (status) => status != null && status < 500,
+              responseType: ResponseType.stream,
+            ),
+          );
+
+          _logger.debugState.redirects += '[$redirectCount] HTTP ${response.statusCode} - $finalStreamUrl\n';
+
+          if (response.statusCode == 301 || response.statusCode == 302 || response.statusCode == 303 || response.statusCode == 307 || response.statusCode == 308) {
+            final location = response.headers.value('location');
+            response.data?.close();
+            if (location != null && location.isNotEmpty) {
+              finalStreamUrl = location;
+              redirectCount++;
+              continue;
+            }
+          }
+
+          response.data?.close();
+          break;
+        } catch (e) {
+          _logger.e('RESOLVE_SERIES_STREAM', 'Resolution failed', error: e);
+          _logger.debugState.redirects += 'Resolution failed: $e\n';
+          break;
+        }
+      }
     }
 
-    final js = response['js'];
-    _logger.debugState.rawResponse = js?.toString() ?? 'null';
-
-    if (js == null || js == false) {
-      throw const PortalException(message: 'No stream data received from portal');
+    if (finalStreamUrl.isEmpty || finalStreamUrl == 'null') {
+      throw const PortalException(message: 'Stream URL is invalid or empty.');
     }
 
-    String streamUrl = '';
-    String errorCode = '';
-
-    if (js is Map<String, dynamic>) {
-      streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
-      errorCode = js['error']?.toString() ?? '';
-    } else if (js is String) {
-      streamUrl = js;
-    }
-
-    if (errorCode == 'nothing_to_play') {
-      throw const PortalException(
-          message: 'This content is currently unavailable on the server. Try another title.');
-    }
-    if (errorCode.isNotEmpty && streamUrl.isEmpty) {
-      throw PortalException(message: 'Server error: $errorCode');
-    }
-
-    final finalUrl = UrlNormalizer.normalize(streamUrl, _client.portalUrl);
-
-    if (finalUrl.isEmpty) {
-      throw const PortalException(
-          message: 'Could not resolve stream URL. This content may not be available.');
-    }
-
-    _logger.debugState.resolvedUrl = finalUrl;
-    _logger.mag('CREATE_SERIES_LINK_FINAL', 'Resolved: $finalUrl');
-    return finalUrl;
+    _logger.debugState.resolvedUrl = finalStreamUrl;
+    _logger.mag('CREATE_SERIES_LINK_FINAL', 'Resolved: $finalStreamUrl');
+    return finalStreamUrl;
   }
 }

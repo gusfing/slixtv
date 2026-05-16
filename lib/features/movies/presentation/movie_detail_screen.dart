@@ -58,7 +58,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
   @override
   Widget build(BuildContext context) {
     // Try to get richer info — fall back to passed-in data if not available or js=false
-    final vodInfo = ref.watch(vodInfoProvider(widget.movie.id));
+    final vodInfo = ref.watch(vodInfoProvider(widget.movie));
     final enriched = vodInfo.whenOrNull(data: (info) => info);
     final movie = enriched ?? widget.movie;
 
