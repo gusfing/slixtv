@@ -5,6 +5,7 @@ import '../../../core/constants/app_dimensions.dart';
 import '../domain/models.dart' show VodItem;
 import '../../auth/domain/providers.dart';
 import '../../player/presentation/player_screen.dart';
+import '../../../core/config/app_config.dart';
 
 /// Movie detail screen: poster, synopsis, cast, play.
 class MovieDetailScreen extends ConsumerStatefulWidget {

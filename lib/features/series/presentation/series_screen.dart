@@ -6,6 +6,7 @@ import '../../../core/widgets/common_widgets.dart';
 import '../domain/models.dart' show SeriesItem, Episode;
 import '../../auth/domain/providers.dart';
 import '../../player/presentation/player_screen.dart';
+import '../../../core/config/app_config.dart';
 
 // ─── Series List Screen ──────────────────────────────────────
 

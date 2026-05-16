@@ -201,4 +201,5 @@ class SeriesService {
       _logger.e('SERIES_INFO', 'Failed for id=$seriesId', error: e);
     }
     return [];
+  }
 }
