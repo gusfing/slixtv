@@ -40,18 +40,51 @@ class VodItem {
         json['has_files'] == true ||
         json['has_files'] == '1';
 
+    final movieId = json['id']?.toString() ?? '';
+    final movieName = json['name']?.toString() ??
+        json['o_name']?.toString() ??
+        json['old_name']?.toString() ??
+        '';
+
+    // ── CMD EXTRACTION ────────────────────────────────────────
+    // Read the raw json['cmd'] FIRST before running extractBestPlaybackCmd.
+    // We do NOT pass it through the extractor blindly — if it's a /media/ path,
+    // we skip it and try alternate fields.
+    final rawJsonCmd = json['cmd']?.toString() ?? '';
+    
+    // Try extracting from alternate fields (ffmpeg_cmd, stream_cmd, etc.)
+    // but explicitly exclude the raw cmd field so we can evaluate it separately.
+    final altFields = ['ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'video_url', 'url', 'file'];
+    String? altCmd;
+    for (final f in altFields) {
+      final v = json[f]?.toString();
+      if (v != null && v.isNotEmpty) { altCmd = v; break; }
+    }
+
+    // Priority:
+    // 1. rawJsonCmd if it's a real STB stream (not /media/)
+    // 2. altCmd from alternate fields
+    // 3. rawJsonCmd even if /media/ (last resort, so the field isn't empty)
+    String cmd;
+    if (rawJsonCmd.isNotEmpty && !rawJsonCmd.startsWith('/media/')) {
+      cmd = rawJsonCmd;
+    } else if (altCmd != null && altCmd.isNotEmpty) {
+      cmd = altCmd;
+    } else {
+      cmd = rawJsonCmd; // keep /media/ as last resort so we still have something
+    }
+
+    print('[VOD_FROM_JSON_CMD] movieId=$movieId name=$movieName rawJsonCmd=$rawJsonCmd altCmd=$altCmd chosenCmd=$cmd');
+
     return VodItem(
-      id: json['id']?.toString() ?? '',
-      name: json['name']?.toString() ??
-          json['o_name']?.toString() ??
-          json['old_name']?.toString() ??
-          '',
+      id: movieId,
+      name: movieName,
       description: _nonNull(json['description']) ??
           _nonNull(json['descr']) ??
           _nonNull(json['o_name']) ??
           '',
       poster: poster,
-      cmd: StalkerParser.extractBestPlaybackCmd(json, null) ?? '',
+      cmd: cmd,
       categoryId: json['category_id']?.toString() ?? '',
       year: _nonNull(json['year']) ?? '',
       rating: _nonNull(json['rating_imdb'])?.toString() ??
@@ -69,6 +102,37 @@ class VodItem {
           _nonNull(json['duration']) ??
           '',
       hasFiles: hasFiles,
+    );
+  }
+
+  /// Creates a copy of this item with updated info fields, preserving cmd
+  /// unless a better (non-/media/) replacement is explicitly provided.
+  VodItem copyWith({
+    String? description,
+    String? poster,
+    String? cmd,
+    String? year,
+    String? rating,
+    String? director,
+    String? actors,
+    String? genre,
+    String? duration,
+    bool? hasFiles,
+  }) {
+    return VodItem(
+      id: id,
+      name: name,
+      description: description ?? this.description,
+      poster: poster ?? this.poster,
+      cmd: cmd ?? this.cmd,
+      categoryId: categoryId,
+      year: year ?? this.year,
+      rating: rating ?? this.rating,
+      director: director ?? this.director,
+      actors: actors ?? this.actors,
+      genre: genre ?? this.genre,
+      duration: duration ?? this.duration,
+      hasFiles: hasFiles ?? this.hasFiles,
     );
   }
 

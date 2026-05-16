@@ -109,7 +109,11 @@ class MoviesService {
 
       return items
           .whereType<Map<String, dynamic>>()
-          .map((e) => VodItem.fromJson(e, _client))
+          .map((e) {
+            final item = VodItem.fromJson(e, _client);
+            _logger.mag('MOVIE_LIST_ITEM', 'movieId=${item.id} title=${item.name} cmd=${item.cmd}');
+            return item;
+          })
           .toList();
     } catch (e) {
       _logger.e('MOVIES_SERVICE', 'getOrderedList failed', error: e);
@@ -127,60 +131,90 @@ class MoviesService {
       final js = response['js'];
       if (js == null || js == false) return null;
 
-      String? bestCmd;
-      final orderedItemCmd = item.cmd;
-      String parserCmd = '';
+      // The cmd from ordered_list (item.cmd) is the source of truth.
+      // We ONLY override it if item.cmd is empty or /media/ AND get_info provides something better.
+      String chosenCmd = item.cmd;
 
-      if (orderedItemCmd.isNotEmpty) {
-        bestCmd = orderedItemCmd;
-      }
-
-      if (bestCmd == null || bestCmd.isEmpty) {
-        final extracted = StalkerParser.extractBestPlaybackCmd(
-          item.toJson(),
-          response,
-        );
-
-        if (extracted != null && extracted.isNotEmpty) {
-          parserCmd = extracted;
-          bestCmd = extracted;
+      if (chosenCmd.isEmpty || chosenCmd.startsWith('/media/')) {
+        // item.cmd is bad — try to find something better in get_info
+        final infoCmd = _extractCmdFromInfoResponse(js);
+        if (infoCmd != null && infoCmd.isNotEmpty && !infoCmd.startsWith('/media/')) {
+          chosenCmd = infoCmd;
         }
+        // If still bad, keep whatever we had (even /media/) so the field isn't null
       }
 
-      // Reject generic /media/ URLs as they are unplayable
-      if (bestCmd != null && bestCmd.startsWith('/media/')) {
-        bestCmd = null;
+      // Hard failure log — so we can see exactly what happened
+      if (chosenCmd.isEmpty || chosenCmd.startsWith('/media/')) {
+        _logger.mag('INVALID_MOVIE_CMD', 
+          'itemCmd=${item.cmd} | infoJsCmd=${_extractCmdFromInfoResponse(js)} | chosenCmd=$chosenCmd'
+        );
       }
 
-      _logger.mag('MOVIE_CMD_SELECTED', 
-        'orderedItemCmd: $orderedItemCmd | parserCmd: $parserCmd | finalCmd: $bestCmd'
+      _logger.mag('MOVIE_CMD_SELECTED',
+        'orderedItemCmd=${item.cmd} | chosenCmd=$chosenCmd'
       );
 
+      // Use copyWith to enrich metadata from get_info WITHOUT touching cmd
       if (js is Map<String, dynamic>) {
-        final info = js['info'];
-        if (info is Map<String, dynamic>) {
-          final combined = {
-            ...info, 
-            'id': item.id,
-          };
-          if (bestCmd != null && bestCmd.isNotEmpty) {
-            combined['cmd'] = bestCmd;
-          }
-          return VodItem.fromJson(combined, _client);
-        }
-        
-        final combinedJs = {
-          ...js, 
-          'id': item.id,
-        };
-        if (bestCmd != null && bestCmd.isNotEmpty) {
-          combinedJs['cmd'] = bestCmd;
-        }
-        return VodItem.fromJson(combinedJs, _client);
+        final info = (js['info'] is Map<String, dynamic>) 
+            ? js['info'] as Map<String, dynamic> 
+            : js;
+
+        return item.copyWith(
+          cmd: chosenCmd,
+          description: _nonNull(info['description']) ?? _nonNull(info['descr']) ?? item.description,
+          year: _nonNull(info['year']) ?? item.year,
+          rating: _nonNull(info['rating_imdb'])?.toString() ??
+              _nonNull(info['rating_kinopoisk'])?.toString() ??
+              _nonNull(info['rate'])?.toString() ??
+              item.rating,
+          director: _nonNull(info['director']) ?? item.director,
+          actors: _nonNull(info['actors']) ?? _nonNull(info['cast']) ?? item.actors,
+          genre: _nonNull(info['genres_str']) ??
+              _nonNull(info['genre_str']) ??
+              _nonNull(info['genre']) ??
+              item.genre,
+          duration: _nonNull(info['time']) ??
+              _nonNull(info['length']) ??
+              _nonNull(info['duration']) ??
+              item.duration,
+        );
       }
     } catch (e) {
       _logger.e('MOVIES_SERVICE', 'get_info failed for ${item.id}', error: e);
     }
     return null;
+  }
+
+  /// Extracts a cmd string from a get_info response 'js' object.
+  /// Tries js.cmd, js.info.cmd, js.files[0].cmd in order.
+  String? _extractCmdFromInfoResponse(dynamic js) {
+    if (js is! Map<String, dynamic>) return null;
+    
+    final directCmd = js['cmd']?.toString();
+    if (directCmd != null && directCmd.isNotEmpty) return directCmd;
+
+    final info = js['info'];
+    if (info is Map<String, dynamic>) {
+      final infoCmd = info['cmd']?.toString();
+      if (infoCmd != null && infoCmd.isNotEmpty) return infoCmd;
+    }
+
+    final files = js['files'];
+    if (files != null) {
+      final filesList = StalkerParser.extractList(files);
+      if (filesList.isNotEmpty && filesList.first is Map) {
+        final fileCmd = (filesList.first as Map)['cmd']?.toString();
+        if (fileCmd != null && fileCmd.isNotEmpty) return fileCmd;
+      }
+    }
+    return null;
+  }
+
+  static String? _nonNull(dynamic v) {
+    if (v == null || v == 'null' || v == '' || v == 0 || v == '0.0') return null;
+    final s = v.toString();
+    return s.isEmpty || s == 'null' ? null : s;
   }
 }
