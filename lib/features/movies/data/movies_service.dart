@@ -127,9 +127,33 @@ class MoviesService {
       final js = response['js'];
       if (js == null || js == false) return null;
 
-      final bestCmd = StalkerParser.extractBestPlaybackCmd(
-        {'cmd': item.cmd}, 
-        response
+      String? bestCmd;
+      final orderedItemCmd = item.cmd;
+      String parserCmd = '';
+
+      if (orderedItemCmd.isNotEmpty) {
+        bestCmd = orderedItemCmd;
+      }
+
+      if (bestCmd == null || bestCmd.isEmpty) {
+        final extracted = StalkerParser.extractBestPlaybackCmd(
+          item.toJson(),
+          response,
+        );
+
+        if (extracted != null && extracted.isNotEmpty) {
+          parserCmd = extracted;
+          bestCmd = extracted;
+        }
+      }
+
+      // Reject generic /media/ URLs as they are unplayable
+      if (bestCmd != null && bestCmd.startsWith('/media/')) {
+        bestCmd = null;
+      }
+
+      _logger.mag('MOVIE_CMD_SELECTED', 
+        'orderedItemCmd: $orderedItemCmd | parserCmd: $parserCmd | finalCmd: $bestCmd'
       );
 
       if (js is Map<String, dynamic>) {
@@ -138,148 +162,25 @@ class MoviesService {
           final combined = {
             ...info, 
             'id': item.id,
-            if (bestCmd != null && bestCmd.isNotEmpty) 'cmd': bestCmd,
           };
+          if (bestCmd != null && bestCmd.isNotEmpty) {
+            combined['cmd'] = bestCmd;
+          }
           return VodItem.fromJson(combined, _client);
         }
-        return VodItem.fromJson({
+        
+        final combinedJs = {
           ...js, 
           'id': item.id,
-          if (bestCmd != null && bestCmd.isNotEmpty) 'cmd': bestCmd,
-        }, _client);
+        };
+        if (bestCmd != null && bestCmd.isNotEmpty) {
+          combinedJs['cmd'] = bestCmd;
+        }
+        return VodItem.fromJson(combinedJs, _client);
       }
     } catch (e) {
       _logger.e('MOVIES_SERVICE', 'get_info failed for ${item.id}', error: e);
     }
     return null;
-  }
-
-  Future<String> createVodLink(String extractedCmd, String movieId) async {
-    _logger.mag('CREATE_VOD_LINK_REQ', 'initial cmd: $extractedCmd | movie_id: $movieId');
-    
-    // Fallback engine: Try multiple variations of the payload until the portal returns a valid stream.
-    final fallbacks = <Map<String, String>>[];
-
-    // If cmd already looks like a raw STB stream (e.g., ffmpeg http://...), use Live TV payload!
-    if (extractedCmd.contains('ffmpeg') || extractedCmd.contains('ffrt') || extractedCmd.contains('auto')) {
-      fallbacks.add({
-        'cmd': extractedCmd,
-        'series': '',
-        'forced_storage': '0',
-        'disable_ad': '0',
-        'volume': '100',
-        'play_mode': '0',
-      });
-    }
-
-    fallbacks.addAll([
-      {'cmd': extractedCmd, 'movie_id': movieId, 'forced_storage': '0', 'disable_ad': '1'},
-      {'cmd': 'ffmpeg $extractedCmd', 'movie_id': movieId, 'forced_storage': '0', 'disable_ad': '1'},
-      {'cmd': extractedCmd.startsWith('/media/') ? '${_client.portalUrl}$extractedCmd' : extractedCmd, 'movie_id': movieId},
-      {'cmd': extractedCmd}, // Strict fallback without movie_id
-    ]);
-
-    String? lastErrorMsg;
-
-    for (int i = 0; i < fallbacks.length; i++) {
-      final payload = fallbacks[i];
-      _logger.debugState.selectedContent = 'VOD: $movieId | Attempt: ${i + 1}';
-      _logger.debugState.cmd = payload['cmd'] ?? '';
-      _logger.debugState.cleanedCmd = UrlNormalizer.stripPlayerDirectives(payload['cmd'] ?? '');
-      _logger.debugState.requestPayload = payload.toString();
-
-      _logger.mag('CREATE_VOD_ATTEMPT', 'Attempt ${i + 1}: $payload');
-
-      try {
-        final response = await _stalkerRequest(
-          action: AppConfig.stalkerCreateLinkAction,
-          extraParams: payload,
-        );
-
-        final js = response['js'];
-        _logger.debugState.rawResponse = js?.toString() ?? 'null';
-
-        if (js == null || js == false) continue;
-
-        String streamUrl = '';
-        String errorCode = '';
-
-        if (js is Map<String, dynamic>) {
-          streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
-          errorCode = js['error']?.toString() ?? '';
-        } else if (js is String) {
-          streamUrl = js;
-        }
-
-        if (errorCode == 'nothing_to_play' || streamUrl.isEmpty) {
-          lastErrorMsg = errorCode;
-          continue; // Try next fallback
-        }
-
-        // We got a stream! Resolve it if it's an internal proxy.
-        return await _resolveStream(streamUrl);
-      } catch (e) {
-        lastErrorMsg = e.toString();
-        _logger.debugState.lastError = lastErrorMsg;
-        continue;
-      }
-    }
-
-    throw PortalException(message: 'Could not resolve a valid stream URL after all fallbacks. Last error: $lastErrorMsg');
-  }
-
-  Future<String> _resolveStream(String streamUrl) async {
-    String finalStreamUrl = UrlNormalizer.stripPlayerDirectives(streamUrl);
-
-    if (finalStreamUrl.contains('localhost') || finalStreamUrl.contains('127.0.0.1')) {
-      final portalUri = Uri.tryParse(_client.portalUrl ?? '');
-      if (portalUri != null) {
-        finalStreamUrl = finalStreamUrl.replaceAll('localhost', portalUri.host).replaceAll('127.0.0.1', portalUri.host);
-      }
-      
-      _logger.mag('RESOLVE_VOD_STREAM', 'Resolving internal stream: $finalStreamUrl');
-      _logger.debugState.redirects = 'Starting manual VOD resolution for: $finalStreamUrl\n';
-      
-      int redirectCount = 0;
-      while (redirectCount < 5) {
-        try {
-          final response = await _client.dio.get(
-            finalStreamUrl,
-            options: Options(
-              followRedirects: false,
-              validateStatus: (status) => status != null && status < 500,
-              responseType: ResponseType.stream,
-            ),
-          );
-
-          _logger.debugState.redirects += '[$redirectCount] HTTP ${response.statusCode} - $finalStreamUrl\n';
-
-          if (response.statusCode == 301 || response.statusCode == 302 || response.statusCode == 303 || response.statusCode == 307 || response.statusCode == 308) {
-            final location = response.headers.value('location');
-            response.data?.close();
-            if (location != null && location.isNotEmpty) {
-              finalStreamUrl = location;
-              redirectCount++;
-              continue;
-            }
-          }
-
-          response.data?.close();
-          break;
-        } catch (e) {
-          _logger.e('RESOLVE_VOD_STREAM', 'Resolution failed', error: e);
-          _logger.debugState.redirects += 'Resolution failed: $e\n';
-          break;
-        }
-      }
-    }
-
-    if (finalStreamUrl.isEmpty || finalStreamUrl == 'null') {
-      throw const PortalException(message: 'Stream URL is invalid or empty.');
-    }
-
-    _logger.debugState.resolvedUrl = finalStreamUrl;
-    _logger.mag('CREATE_VOD_LINK_FINAL', 'Resolved: $finalStreamUrl');
-    return finalStreamUrl;
   }
 }

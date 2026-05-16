@@ -162,8 +162,12 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
     setState(() => _playingEpisodeId = ep.id);
 
     try {
-      final seriesService = ref.read(seriesServiceProvider);
-      final streamUrl = await seriesService.createSeriesLink(ep.cmd, widget.series.id, ep.id);
+      final stalkerApi = ref.read(stalkerApiProvider);
+      final streamUrl = await stalkerApi.createLink(
+        ep.cmd,
+        AppConfig.typeSeries,
+        seriesId: widget.series.id,
+      );
 
       if (!mounted) return;
       setState(() => _playingEpisodeId = null);

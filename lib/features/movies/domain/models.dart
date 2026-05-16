@@ -72,6 +72,24 @@ class VodItem {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'poster': poster,
+      'cmd': cmd,
+      'category_id': categoryId,
+      'year': year,
+      'rating': rating,
+      'director': director,
+      'actors': actors,
+      'genre': genre,
+      'duration': duration,
+      'has_files': hasFiles ? 1 : 0,
+    };
+  }
+
   static String? _nonNull(dynamic v) {
     if (v == null || v == 'null' || v == '' || v == 0 || v == '0.0') return null;
     final s = v.toString();
