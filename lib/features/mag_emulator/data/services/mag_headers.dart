@@ -24,13 +24,23 @@ class MagHeaders {
       headers['Referer'] = '${sessionManager.portalBaseUrl}/';
     }
 
-    // Cookie header with MAC address and timezone
-    headers['Cookie'] = 'mac=${Uri.encodeComponent(deviceIdentity.mac)}; timezone=Europe/Kyiv';
+    // Cookie header with MAC address, language, timezone, serial, and token
+    final Map<String, String> cookies = {
+      'mac': Uri.encodeComponent(deviceIdentity.mac),
+      'stb_lang': 'en',
+      'timezone': 'Europe/Kyiv',
+    };
+    if (deviceIdentity.serialNumber.isNotEmpty) {
+      cookies['sn'] = Uri.encodeComponent(deviceIdentity.serialNumber);
+    }
 
     final bearerToken = sessionManager.getBearerToken();
     if (bearerToken != null && bearerToken.isNotEmpty) {
       headers['Authorization'] = 'Bearer $bearerToken';
+      cookies['token'] = bearerToken;
     }
+
+    headers['Cookie'] = cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
 
     return headers;
   }

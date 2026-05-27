@@ -7,9 +7,7 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_dimensions.dart';
 import '../../../core/config/app_config.dart';
 import '../domain/providers.dart';
-import '../../profile/presentation/problem_inspector_screen.dart';
-import '../../mag_emulator/mag_emulator_provider.dart';
-import '../../mag_emulator/presentation/screens/debug_dashboard_screen.dart';
+import '../../profile/presentation/technical_inspector_screen.dart';
 
 /// Login screen for MAG/Stalker portal authentication.
 class LoginScreen extends ConsumerStatefulWidget {
@@ -75,10 +73,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _debugTapCount = 0;
       _firstTapTime = null;
       
-      // Open the Playback Diagnostics Dashboard directly
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => const DebugDashboardScreen(),
+          builder: (_) => const TechnicalInspectorScreen(),
         ),
       );
     }
@@ -340,7 +337,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: TextButton.icon(
                       onPressed: () {
                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const ProblemInspectorScreen()),
+                          MaterialPageRoute(builder: (_) => const TechnicalInspectorScreen()),
                         );
                       },
                       icon: const Icon(Icons.troubleshoot_rounded, size: 18),

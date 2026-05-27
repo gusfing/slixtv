@@ -46,7 +46,7 @@ class AppLogger {
     );
   }
 
-  List<LogEntry> get logBuffer => List.unmodifiable(_logBuffer);
+  List<LogEntry> get logBuffer => List<LogEntry>.from(_logBuffer);
 
   void _addToBuffer(LogLevel level, String tag, String message, {dynamic error}) {
     _logBuffer.add(LogEntry(
@@ -136,12 +136,21 @@ class AppLogger {
   void clearBuffer() => _logBuffer.clear();
 
   String exportLogs() {
+    // Copy safely via index loop to prevent ConcurrentModificationError if logs append simultaneously
+    final snapshot = <LogEntry>[];
+    final currentLength = _logBuffer.length;
+    for (var i = 0; i < currentLength; i++) {
+      if (i < _logBuffer.length) {
+        snapshot.add(_logBuffer[i]);
+      }
+    }
+
     final buffer = StringBuffer();
     buffer.writeln('=== SliX TV Debug Report ===');
     buffer.writeln('Generated: ${DateTime.now().toIso8601String()}');
-    buffer.writeln('Total entries: ${_logBuffer.length}');
+    buffer.writeln('Total entries: ${snapshot.length}');
     buffer.writeln('');
-    for (final entry in _logBuffer) {
+    for (final entry in snapshot) {
       buffer.writeln(entry.toString());
     }
     return buffer.toString();

@@ -5,8 +5,7 @@ import 'package:animate_do/animate_do.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../auth/domain/providers.dart';
-import '../../profile/presentation/problem_inspector_screen.dart';
-import '../../mag_emulator/mag_emulator_provider.dart';
+import '../../profile/presentation/technical_inspector_screen.dart';
 
 /// Animated splash screen with session restore.
 class SplashScreen extends ConsumerStatefulWidget {
@@ -58,8 +57,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       if (mounted) setState(() => _showHelpButton = true);
     });
 
-    // Pre-warm MAG device identity in parallel (non-blocking)
-    ref.read(deviceIdentityProvider.future).ignore();
+
 
     // Try restoring session
     final restored = await ref.read(authProvider.notifier).tryRestoreSession();
@@ -169,7 +167,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                 child: TextButton.icon(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ProblemInspectorScreen()),
+                      MaterialPageRoute(builder: (_) => const TechnicalInspectorScreen()),
                     );
                   },
                   icon: const Icon(Icons.troubleshoot_rounded, size: 18),

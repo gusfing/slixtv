@@ -1,4 +1,4 @@
-/// Custom exceptions for the application.
+// Custom exceptions for the application.
 
 class ServerException implements Exception {
   final String message;

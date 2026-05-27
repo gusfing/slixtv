@@ -23,6 +23,15 @@ class StalkerApiService {
   String? get serverLoadPath => _serverLoadPath;
   ApiClient get client => _client;
 
+  void setServerLoadPath(String path) {
+    _serverLoadPath = path;
+    _client.serverLoadPath = path;
+  }
+
+  void setAuthenticated(bool val) {
+    _isAuthenticated = val;
+  }
+
   // ─── Step 1: Handshake ──────────────────────────────────
 
   Future<String> handshake(String portalUrl, String macAddress) async {
@@ -166,15 +175,20 @@ class StalkerApiService {
   }
 
   Future<StalkerMainInfo> getMainInfo() async {
-    final response = await _stalkerRequest(
-      type: AppConfig.typeStb,
-      action: AppConfig.stalkerGetMainInfoAction,
-    );
-    final js = response['js'];
-    if (js == null || js == false || js is! Map<String, dynamic>) {
-      return const StalkerMainInfo(serverName: '');
+    try {
+      final response = await _stalkerRequest(
+        type: AppConfig.typeStb,
+        action: AppConfig.stalkerGetMainInfoAction,
+      );
+      final js = response['js'];
+      if (js == null || js == false || js is! Map<String, dynamic>) {
+        return const StalkerMainInfo(serverName: 'Stalker Portal');
+      }
+      return StalkerMainInfo.fromJson(js);
+    } catch (e) {
+      _logger.w('API', 'get_main_info not fully supported by this portal: $e');
+      return const StalkerMainInfo(serverName: 'Stalker Portal');
     }
-    return StalkerMainInfo.fromJson(js);
   }
 
   // ─── Step 3: Categories ─────────────────────────────────
@@ -296,8 +310,8 @@ class StalkerApiService {
     List? raw;
     if (js is Map<String, dynamic>) {
       final rawData = js['data'];
-      if (rawData is List) raw = rawData;
-      else if (rawData is Map) raw = rawData.values.toList();
+      if (rawData is List) { raw = rawData; }
+      else if (rawData is Map) { raw = rawData.values.toList(); }
     } else if (js is List) {
       raw = js;
     }
@@ -330,8 +344,8 @@ class StalkerApiService {
       List? data;
       if (js is Map<String, dynamic>) {
         final rawData = js['data'];
-        if (rawData is List) data = rawData;
-        else if (rawData is Map) data = rawData.values.toList();
+        if (rawData is List) { data = rawData; }
+        else if (rawData is Map) { data = rawData.values.toList(); }
       } else if (js is List) {
         data = js;
       }
@@ -350,28 +364,38 @@ class StalkerApiService {
   ///
   /// The cmd from get_ordered_list (e.g. /media/464066.mpg or ffmpeg http://...)
   /// must be sent to create_link which returns the actual resolved stream URL.
-  Future<String> createLink(String cmd, String type, {String? seriesId}) async {
-    _logger.mag('CREATE_LINK', 'type=$type cmd=$cmd');
+  Future<String> createLink(String cmd, String type, {String? seriesId, Map<String, dynamic>? itemObject}) async {
+    final reqType = (type == AppConfig.typeSeries) ? AppConfig.typeVod : type;
+    _logger.mag('CREATE_LINK', 'type=$type (reqType=$reqType) cmd=$cmd seriesId=$seriesId');
     
     // Diagnostic: Capture starting state
     _logger.debugState.selectedContent = 'Type: $type | Cmd: $cmd';
     _logger.debugState.cmd = cmd;
     _logger.debugState.cleanedCmd = UrlNormalizer.stripPlayerDirectives(cmd);
 
+    String streamUrl = '';
+
     final params = {
       'cmd': cmd,
-      'series': seriesId ?? '',
-      'forced_storage': '0',
-      'disable_ad': '0',
-      'volume': '100',
-      'play_mode': '0',
+      if (reqType == AppConfig.typeVod) ...{
+        'series': seriesId ?? '',
+        'forced_storage': '',
+        'disable_ad': '0',
+        'download': '0',
+        'force_ch_link_check': '0',
+      } else ...{
+        'forced_storage': '0',
+        'disable_ad': '0',
+        'volume': '100',
+        'play_mode': '0',
+      }
     };
     _logger.debugState.requestPayload = params.toString();
 
     Map<String, dynamic> response;
     try {
       response = await _stalkerRequest(
-        type: type,
+        type: reqType,
         action: AppConfig.stalkerCreateLinkAction,
         extraParams: params,
       );
@@ -381,13 +405,21 @@ class StalkerApiService {
     }
 
     final js = response['js'];
+    final rawText = response['text']?.toString() ?? '';
+    final isTimeout = rawText.contains('Connection timeout') || rawText.contains('Failed to connect');
+
     _logger.debugState.rawResponse = js?.toString() ?? 'null';
+
+    if (isTimeout) {
+      throw const PortalException(
+        message: 'The portal storage server is temporarily offline (Connection Timeout). Please try again later.'
+      );
+    }
 
     if (js == null || js == false) {
       throw const PortalException(message: 'No stream data received from portal');
     }
 
-    String streamUrl = '';
     String errorCode = '';
 
     if (js is Map<String, dynamic>) {
@@ -463,6 +495,135 @@ class StalkerApiService {
     return streamUrl;
   }
 
+  // ─── Telemetry & Synchronization ────────────────────────
+
+  /// Extracts the file ID from a media command string.
+  String _extractFileId(String cmd, String fallback) {
+    final fileMatch = RegExp(r'file_(\d+)').firstMatch(cmd);
+    if (fileMatch != null) return fileMatch.group(1)!;
+    final mediaMatch = RegExp(r'/media/(\d+)').firstMatch(cmd);
+    if (mediaMatch != null) return mediaMatch.group(1)!;
+    return fallback;
+  }
+
+  /// Sends play-start events to the portal, matching STBEmu.
+  Future<void> logStartPlay({
+    required String videoId,
+    required String cmd,
+    required String resolvedUrl,
+  }) async {
+    _logger.mag('TELEMETRY_PLAY', 'Start videoId=$videoId cmd=$cmd');
+    final fileId = _extractFileId(cmd, videoId);
+
+    try {
+      // 1. Send stb log with real_action=play
+      final logParams = {
+        'real_action': 'play',
+        'param': '[object Object]',
+        'content_id': fileId,
+        'tmp_type': '2', // VOD
+        'id': videoId,
+        'cmd': resolvedUrl,
+        'storage_id': '',
+        'load': '',
+        'error': '',
+        'subtitles': '',
+      };
+
+      _stalkerRequest(
+        type: AppConfig.typeStb,
+        action: 'log',
+        extraParams: logParams,
+      ).then((_) {
+        _logger.mag('TELEMETRY_PLAY', 'stb/log success');
+      }).catchError((e) {
+        _logger.e('TELEMETRY_PLAY', 'stb/log failed', error: e);
+      });
+
+      // 2. Set as played
+      _stalkerRequest(
+        type: AppConfig.typeVod,
+        action: 'set_played',
+        extraParams: {
+          'video_id': videoId,
+          'storage_id': '',
+        },
+      ).then((_) {
+        _logger.mag('TELEMETRY_PLAY', 'vod/set_played success');
+      }).catchError((e) {
+        _logger.e('TELEMETRY_PLAY', 'vod/set_played failed', error: e);
+      });
+
+    } catch (e) {
+      _logger.e('TELEMETRY_PLAY', 'Failed to dispatch start play logs', error: e);
+    }
+  }
+
+  /// Sends play-stop events and syncs bookmarks with the portal.
+  Future<void> logStopPlay({
+    required String videoId,
+    required String cmd,
+    required String resolvedUrl,
+    required int positionSeconds,
+    String? seriesId,
+  }) async {
+    _logger.mag('TELEMETRY_STOP', 'Stop videoId=$videoId pos=$positionSeconds');
+    final fileId = _extractFileId(cmd, videoId);
+
+    try {
+      // 1. Send stb log with real_action=stop
+      final logParams = {
+        'real_action': 'stop',
+        'param': '',
+        'content_id': '0',
+        'tmp_type': '2',
+        'storage_id': '',
+      };
+
+      _stalkerRequest(
+        type: AppConfig.typeStb,
+        action: 'log',
+        extraParams: logParams,
+      ).then((_) {
+        _logger.mag('TELEMETRY_STOP', 'stb/log success');
+      }).catchError((e) {
+        _logger.e('TELEMETRY_STOP', 'stb/log failed', error: e);
+      });
+
+      // 2. Delete resolved stream link from portal session
+      _stalkerRequest(
+        type: AppConfig.typeVod,
+        action: 'del_link',
+        extraParams: {
+          'item': resolvedUrl,
+        },
+      ).then((_) {
+        _logger.mag('TELEMETRY_STOP', 'vod/del_link success');
+      }).catchError((e) {
+        _logger.e('TELEMETRY_STOP', 'vod/del_link failed', error: e);
+      });
+
+      // 3. Sync watch progress (set_not_ended)
+      _stalkerRequest(
+        type: AppConfig.typeVod,
+        action: 'set_not_ended',
+        extraParams: {
+          'video_id': videoId,
+          'series': seriesId ?? '0',
+          'end_time': positionSeconds.toString(),
+          'file_id': fileId,
+        },
+      ).then((_) {
+        _logger.mag('TELEMETRY_STOP', 'vod/set_not_ended success');
+      }).catchError((e) {
+        _logger.e('TELEMETRY_STOP', 'vod/set_not_ended failed', error: e);
+      });
+
+    } catch (e) {
+      _logger.e('TELEMETRY_STOP', 'Failed to dispatch stop play logs', error: e);
+    }
+  }
+
   // ─── Session Management ─────────────────────────────────
 
   Future<bool> reAuthenticate(String portalUrl, String macAddress) async {
@@ -493,7 +654,7 @@ class StalkerApiService {
   }) async {
     if (_serverLoadPath == null) {
       throw const AuthException(
-          message: 'Not connected to portal. Please login first.');
+          message: 'Server load path is not configured.');
     }
 
     final params = <String, String>{
@@ -504,7 +665,7 @@ class StalkerApiService {
       ...?extraParams,
     };
 
-    _logger.mag('REQUEST', '→ $action [$type]');
+    _logger.mag('REQUEST', '→ $action [$type] via Native Dio');
 
     try {
       final response = await _client.dio.get(
@@ -512,50 +673,35 @@ class StalkerApiService {
         queryParameters: params,
         options: Options(
           validateStatus: (s) => s != null && s < 600,
-          receiveTimeout: const Duration(seconds: 40),
         ),
       );
 
-      if (response.statusCode == 429) {
-        throw const ServerException(
-            message: 'Rate limited. Please wait and try again.',
-            statusCode: 429);
-      }
+      dynamic data = response.data;
+      final rawBody = data?.toString() ?? '';
+      final bodyPreview = rawBody.length > 300 ? rawBody.substring(0, 300) : rawBody;
 
-      if (response.statusCode != null && response.statusCode! >= 400) {
-        throw ServerException(
-            message: 'Server ${response.statusCode} for $action',
-            statusCode: response.statusCode);
-      }
-
-      Map<String, dynamic> data;
-      if (response.data is Map<String, dynamic>) {
-        data = response.data;
-      } else if (response.data is String) {
+      if (data is String) {
         try {
-          data = jsonDecode(response.data as String) as Map<String, dynamic>;
-        } catch (_) {
-          data = {'js': response.data};
-        }
-      } else {
-        data = {};
+          data = jsonDecode(data);
+        } catch (_) {}
       }
 
-      _logger.mag('RESPONSE', '← $action js=${data['js']?.runtimeType}');
-      return data;
+      if (data is Map<String, dynamic>) {
+        _logger.mag('RESPONSE', '← $action js=${data['js']?.runtimeType}');
+        return data;
+      }
+
+      final ctype = response.headers.value('content-type') ?? 'unknown';
+      final errorMsg = 'Invalid response format (status: ${response.statusCode}, type: $ctype). Preview: $bodyPreview';
+      _logger.e('API', 'Request failed: $action - $errorMsg');
+      throw PortalException(message: errorMsg);
     } on DioException catch (e) {
-      final errMessage = e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout
-          ? 'Connection timeout — check your network'
-          : e.type == DioExceptionType.connectionError
-              ? 'Cannot reach portal server'
-              : 'Network error: ${e.message}';
-      
-      final err = ServerException(message: errMessage);
-      _logger.e('NETWORK', err.message, error: e);
-      throw err;
+      _logger.e('API', 'Request failed: $action', error: e.message);
+      throw PortalException(message: 'Request failed: ${e.message}');
     } catch (e) {
-      _logger.e('API', 'Unexpected error', error: e);
-      rethrow;
+      if (e is PortalException) rethrow;
+      _logger.e('API', 'Request failed: $action', error: e);
+      throw PortalException(message: 'Request failed: $e');
     }
   }
 }

@@ -41,6 +41,7 @@ class SlixTvApp extends StatelessWidget {
 }
 
 /// Top-level navigator that handles auth state transitions.
+
 class _AppNavigator extends ConsumerStatefulWidget {
   const _AppNavigator();
 
@@ -60,19 +61,25 @@ class _AppNavigatorState extends ConsumerState<_AppNavigator> {
       }
     });
 
+    final Widget activeScreen;
     switch (_currentScreen) {
       case _Screen.splash:
-        return SplashScreen(
+        activeScreen = SplashScreen(
           onAuthenticated: () => setState(() => _currentScreen = _Screen.main),
           onUnauthenticated: () => setState(() => _currentScreen = _Screen.login),
         );
+        break;
       case _Screen.login:
-        return const LoginScreen();
+        activeScreen = const LoginScreen();
+        break;
       case _Screen.main:
-        return AppShell(
+        activeScreen = AppShell(
           onLogout: () => setState(() => _currentScreen = _Screen.login),
         );
+        break;
     }
+
+    return activeScreen;
   }
 }
 

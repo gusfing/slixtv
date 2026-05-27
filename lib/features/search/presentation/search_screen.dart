@@ -56,14 +56,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               loading: () => const LoadingIndicator(message: 'Searching...'),
               error: (e, _) => ErrorDisplay(message: 'Search failed'),
               data: (r) {
-                final ch = r['channels'] as List? ?? [];
-                final mv = r['movies'] as List? ?? [];
-                final sr = r['series'] as List? ?? [];
+                final ch = r['channels'] ?? [];
+                final mv = r['movies'] ?? [];
+                final sr = r['series'] ?? [];
                 if (ch.isEmpty && mv.isEmpty && sr.isEmpty) return Center(child: Text(AppStrings.noResults, style: TextStyle(color: AppColors.textTertiary)));
                 return ListView(children: [
                   if (ch.isNotEmpty) ...[const SectionHeader(title: 'Channels'), ...ch.cast<Channel>().map((c) => ChannelTile(name: c.name, logo: c.logo, onTap: () => widget.onChannelTap?.call(c)))],
-                  if (mv.isNotEmpty) ...[const SectionHeader(title: 'Movies'), SizedBox(height: AppDimensions.posterHeight + 40, child: ListView.separated(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md), itemCount: mv.length, separatorBuilder: (_, __) => const SizedBox(width: AppDimensions.sm), itemBuilder: (_, i) { final m = mv[i] as VodItem; return PosterCard(title: m.name, imageUrl: m.poster, subtitle: m.year, onTap: () => widget.onMovieTap?.call(m)); }))],
-                  if (sr.isNotEmpty) ...[const SectionHeader(title: 'Series'), SizedBox(height: AppDimensions.posterHeight + 40, child: ListView.separated(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md), itemCount: sr.length, separatorBuilder: (_, __) => const SizedBox(width: AppDimensions.sm), itemBuilder: (_, i) { final s = sr[i] as SeriesItem; return PosterCard(title: s.name, imageUrl: s.poster, subtitle: s.year, onTap: () => widget.onSeriesTap?.call(s)); }))],
+                  if (mv.isNotEmpty) ...[const SectionHeader(title: 'Movies'), SizedBox(height: AppDimensions.posterHeight + 40, child: ListView.separated(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md), itemCount: mv.length, separatorBuilder: (context, index) => const SizedBox(width: AppDimensions.sm), itemBuilder: (_, i) { final m = mv[i] as VodItem; return PosterCard(title: m.name, imageUrl: m.poster, subtitle: m.year, onTap: () => widget.onMovieTap?.call(m)); }))],
+                  if (sr.isNotEmpty) ...[const SectionHeader(title: 'Series'), SizedBox(height: AppDimensions.posterHeight + 40, child: ListView.separated(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md), itemCount: sr.length, separatorBuilder: (context, index) => const SizedBox(width: AppDimensions.sm), itemBuilder: (_, i) { final s = sr[i] as SeriesItem; return PosterCard(title: s.name, imageUrl: s.poster, subtitle: s.year, onTap: () => widget.onSeriesTap?.call(s)); }))],
                   const SizedBox(height: 100),
                 ]);
               },

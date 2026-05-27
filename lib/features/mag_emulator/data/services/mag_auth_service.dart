@@ -90,12 +90,12 @@ class MagAuthService {
 
     } on DioException catch (e) {
       if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
-        sessionManager.clearSession();
+        // Do NOT clear session — transient auth errors shouldn't nuke saved credentials
         throw AuthenticationException('Authentication failed: HTTP ${e.response?.statusCode}');
       }
       throw NetworkException('Network error during authentication: ${e.message}');
     } catch (e) {
-      sessionManager.clearSession();
+      // Do NOT clear session — preserve login state on unexpected errors
       if (e is AuthenticationException) rethrow;
       throw AuthenticationException('Unexpected error during authentication: $e');
     }

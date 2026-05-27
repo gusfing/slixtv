@@ -38,7 +38,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
               preferredSize: const Size.fromHeight(50),
               child: categories.when(
                 loading: () => const SizedBox(height: 50),
-                error: (_, __) => const SizedBox(height: 50),
+                error: (error, stackTrace) => const SizedBox(height: 50),
                 data: (cats) => SizedBox(
                   height: 50,
                   child: ListView(

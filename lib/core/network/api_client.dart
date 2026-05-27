@@ -18,15 +18,13 @@ class ApiClient {
   String? _macAddress;
   String? _token;
   String? _serialNumber;
-  String? _serverLoadPath;
+  String? serverLoadPath;
 
   Dio get dio => _dio;
   CookieJar get cookieJar => _cookieJar;
   String? get portalUrl => _portalUrl;
   String? get macAddress => _macAddress;
   String? get token => _token;
-  String? get serverLoadPath => _serverLoadPath;
-  set serverLoadPath(String? path) => _serverLoadPath = path;
 
   ApiClient._internal() {
     _cookieJar = CookieJar();
@@ -64,7 +62,7 @@ class ApiClient {
 
   void clearSession() {
     _token = null;
-    _serverLoadPath = null;
+    serverLoadPath = null;
     _cookieJar.deleteAll();
     _logger.i('ApiClient', 'Session cleared');
   }
@@ -100,14 +98,13 @@ class ApiClient {
 
   String _generateSerialNumber(String mac) {
     final cleanMac = mac.replaceAll(':', '');
+    if (cleanMac.length >= 10) {
+      return '12${cleanMac.substring(cleanMac.length - 10).toUpperCase()}';
+    }
     return cleanMac.padRight(12, '0').substring(0, 12).toUpperCase();
   }
 
-  String _generateDeviceId(String mac) {
-    final cleanMac = mac.replaceAll(':', '').toUpperCase();
-    // Create a 40-character pseudo-random but consistent device ID from MAC
-    return (cleanMac + cleanMac + cleanMac + cleanMac).substring(0, 40);
-  }
+
 
   String? get serialNumber => _serialNumber;
 }
@@ -123,18 +120,24 @@ class _StalkerHeaderInterceptor extends Interceptor {
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     options.headers.addAll({
       'User-Agent':
-          'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250 stbapp ver: 4 rev: 231 Safari/533.3',
-      'X-User-Agent': 'Model: MAG250; Link: WiFi',
+          'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3',
+      'X-User-Agent': 'Model: MAG250; Link: Ethernet',
       'Accept': '*/*',
       'Accept-Language': 'en_US',
       'Accept-Encoding': 'gzip, deflate',
       'Referer': '${_client.portalBase}/c/',
     });
 
+    final extraCookies = <String, String>{};
     if (_client._macAddress != null) {
       final mac = _client._macAddress!;
-      // Standard Stalker cookie
-      options.headers['Cookie'] = 'mac=$mac; stb_lang=en; timezone=UTC';
+      // mac and sn must be raw (not URL-encoded) — portal matches against registered MAC
+      extraCookies['mac'] = mac;
+      extraCookies['stb_lang'] = 'en';
+      extraCookies['timezone'] = 'Europe/Kyiv';
+      if (_client.serialNumber != null) {
+        extraCookies['sn'] = _client.serialNumber!;
+      }
       
       // Inject MAC in headers as well, matching both standard Stalker and XC emulations
       options.headers['MAC'] = mac;
@@ -143,9 +146,31 @@ class _StalkerHeaderInterceptor extends Interceptor {
 
     if (_client._token != null) {
       options.headers['Authorization'] = 'Bearer ${_client._token}';
+      extraCookies['token'] = _client._token!;
+    }
+
+    if (extraCookies.isNotEmpty) {
+      final existingCookie = options.headers['Cookie']?.toString() ?? '';
+      options.headers['Cookie'] = _mergeCookies(existingCookie, extraCookies);
     }
 
     handler.next(options);
+  }
+
+  String _mergeCookies(String existing, Map<String, String> extra) {
+    final cookies = <String, String>{};
+    if (existing.isNotEmpty) {
+      for (final pair in existing.split(';')) {
+        final parts = pair.split('=');
+        if (parts.length == 2) {
+          cookies[parts[0].trim()] = parts[1].trim();
+        }
+      }
+    }
+    extra.forEach((key, value) {
+      cookies[key] = value;
+    });
+    return cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
   }
 }
 

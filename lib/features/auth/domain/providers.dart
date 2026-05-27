@@ -1,3 +1,4 @@
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/stalker_api_service.dart';
 import '../data/models.dart';
@@ -8,6 +9,8 @@ import '../../movies/data/movies_service.dart';
 import '../../series/data/series_service.dart';
 import '../../movies/domain/models.dart' as vod_models;
 import '../../series/domain/models.dart' as series_models;
+
+import '../../../core/errors/exceptions.dart';
 
 // ─── Services ──────────────────────────────────────────────
 
@@ -21,11 +24,15 @@ final stalkerApiProvider = Provider<StalkerApiService>((ref) {
 final apiClientProvider = Provider<ApiClient>((ref) => _sharedApiService.client);
 
 final moviesServiceProvider = Provider<MoviesService>((ref) {
-  return MoviesService(ref.watch(apiClientProvider));
+  return MoviesService(
+    ref.watch(apiClientProvider),
+  );
 });
 
 final seriesServiceProvider = Provider<SeriesService>((ref) {
-  return SeriesService(ref.watch(apiClientProvider));
+  return SeriesService(
+    ref.watch(apiClientProvider),
+  );
 });
 
 final secureStorageProvider = Provider<SecureStorageService>((ref) {
@@ -102,23 +109,29 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Try restoring a saved session.
   Future<bool> tryRestoreSession() async {
-    _logger.i('AUTH', 'Attempting session restore');
+    _logger.i('AUTH', 'Attempting native session restore');
     state = state.copyWith(status: AuthStatus.loading, sessionReady: false);
 
     try {
       final creds = await _storage.getPortalCredentials();
       final portalUrl = creds['portalUrl'];
       final macAddress = creds['macAddress'];
-      final rememberMe = await _storage.getRememberMe();
 
-      if (portalUrl == null || macAddress == null || !rememberMe) {
-        _logger.i('AUTH', 'No saved session found');
+      if (portalUrl == null || macAddress == null) {
+        _logger.i('AUTH', 'No saved credentials found');
         state = state.copyWith(status: AuthStatus.unauthenticated, sessionReady: false);
         return false;
       }
 
+      state = state.copyWith(
+        portalUrl: portalUrl,
+        macAddress: macAddress,
+      );
+
+      _logger.i('AUTH', 'Starting native handshake for session restore...');
       final token = await _api.handshake(portalUrl, macAddress);
       final profile = await _api.getProfile();
+
       StalkerMainInfo? mainInfo;
       try {
         mainInfo = await _api.getMainInfo();
@@ -136,7 +149,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         rememberMe: true,
         sessionReady: true,
       );
-      _logger.i('AUTH', 'Session restored successfully');
+      _logger.i('AUTH', 'Session restored successfully natively');
       return true;
     } catch (e) {
       _logger.e('AUTH', 'Session restore failed', error: e);
@@ -156,10 +169,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
 
     try {
-      _logger.i('AUTH', 'Starting login flow');
+      _logger.i('AUTH', 'Starting native login flow');
+      
       final token = await _api.handshake(portalUrl, macAddress);
       final profile = await _api.getProfile();
-
+      
+      // profile.status == false means the server returned blocked=1 or status=1
+      if (!profile.status) {
+        throw const AuthException(
+          message: 'MAC address not registered or subscription is blocked.\n'
+              'Please check your MAC address or contact your IPTV provider.',
+        );
+      }
+      
       StalkerMainInfo? mainInfo;
       try {
         mainInfo = await _api.getMainInfo();
@@ -167,14 +189,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
         _logger.w('AUTH', 'getMainInfo failed during login (ignored)');
       }
 
-      if (rememberMe) {
-        await _storage.savePortalCredentials(
-          portalUrl: portalUrl,
-          macAddress: macAddress,
-        );
-        await _storage.saveToken(token);
-        await _storage.setRememberMe(true);
-      }
+      await _storage.savePortalCredentials(
+        portalUrl: portalUrl,
+        macAddress: macAddress,
+      );
+      await _storage.saveToken(token);
+      await _storage.setRememberMe(rememberMe);
 
       state = state.copyWith(
         status: AuthStatus.authenticated,
@@ -184,7 +204,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         rememberMe: rememberMe,
         sessionReady: true,
       );
-      _logger.i('AUTH', 'Login successful & session ready');
+      _logger.i('AUTH', 'Login successful & session ready (native)');
     } catch (e) {
       _logger.e('AUTH', 'Login failed', error: e);
       state = state.copyWith(

@@ -22,12 +22,22 @@ class PlayerHeadersService {
       headers['Referer'] = '${sessionManager.portalBaseUrl}/';
     }
 
-    headers['Cookie'] = 'mac=${Uri.encodeComponent(deviceIdentity.mac)}; timezone=Europe/Kyiv';
+    final Map<String, String> cookies = {
+      'mac': Uri.encodeComponent(deviceIdentity.mac),
+      'stb_lang': 'en',
+      'timezone': 'Europe/Kyiv',
+    };
+    if (deviceIdentity.serialNumber.isNotEmpty) {
+      cookies['sn'] = Uri.encodeComponent(deviceIdentity.serialNumber);
+    }
 
     final bearerToken = sessionManager.getBearerToken();
     if (bearerToken != null && bearerToken.isNotEmpty) {
       headers['Authorization'] = 'Bearer $bearerToken';
+      cookies['token'] = bearerToken;
     }
+
+    headers['Cookie'] = cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
 
     // Generic print for now. Will be replaced by Logger later.
     print('Injecting Player Headers:');

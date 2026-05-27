@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/core/utils/stalker_parser.dart';
-import '../lib/core/network/api_client.dart';
+import 'package:slix_iptv/core/utils/stalker_parser.dart';
+import 'package:slix_iptv/core/network/api_client.dart';
 
 void main() {
   group('StalkerParser extractList tests', () {

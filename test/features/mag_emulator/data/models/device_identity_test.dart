@@ -4,19 +4,19 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:slix_iptv/features/mag_emulator/data/models/device_identity.dart';
 
 /// A simple fake storage that stores data in-memory for tests.
-class FakeSecureStorage implements FlutterSecureStorage {
+class FakeSecureStorage extends FlutterSecureStorage {
   final Map<String, String> _storage = {};
 
   @override
   Future<String?> read({
     required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-    AppleOptions? appleOptions,
+    dynamic aOptions,
+    dynamic iOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+    dynamic appleOptions,
   }) async {
     return _storage[key];
   }
@@ -25,13 +25,13 @@ class FakeSecureStorage implements FlutterSecureStorage {
   Future<void> write({
     required String key,
     required String? value,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-    AppleOptions? appleOptions,
+    dynamic aOptions,
+    dynamic iOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+    dynamic appleOptions,
   }) async {
     if (value == null) {
       _storage.remove(key);
@@ -43,52 +43,48 @@ class FakeSecureStorage implements FlutterSecureStorage {
   @override
   Future<bool> containsKey({
     required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-    AppleOptions? appleOptions,
+    dynamic aOptions,
+    dynamic iOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+    dynamic appleOptions,
   }) async => _storage.containsKey(key);
 
   @override
   Future<void> delete({
     required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-    AppleOptions? appleOptions,
+    dynamic aOptions,
+    dynamic iOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+    dynamic appleOptions,
   }) async => _storage.remove(key);
 
   @override
   Future<void> deleteAll({
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-    AppleOptions? appleOptions,
+    dynamic aOptions,
+    dynamic iOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+    dynamic appleOptions,
   }) async => _storage.clear();
 
   @override
   Future<Map<String, String>> readAll({
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-    AppleOptions? appleOptions,
+    dynamic aOptions,
+    dynamic iOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+    dynamic appleOptions,
   }) async => Map.from(_storage);
-
-  // Required by the interface but not used in tests
-  @override
-  FlutterSecureStorageOptions get options => const AndroidOptions();
 }
 
 void main() {

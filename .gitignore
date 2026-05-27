@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Decompilation & emulation tools/assets
+StbEmu (Pro) vv2.0.21.00 (Patched).apk
+decompiled_sources/
+jadx-cli/
+stb_js/
+stalker_web_tester/
+test_output_targeted.txt
+test_output_targeted_utf8.txt
+test_output.txt
+test_raw.dart
+test_api.dart
+

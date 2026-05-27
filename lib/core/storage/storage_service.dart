@@ -8,7 +8,7 @@ class SecureStorageService {
   factory SecureStorageService() => _instance;
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
   final AppLogger _logger = AppLogger();
@@ -152,6 +152,22 @@ class PreferencesService {
   }
 
   // ─── Clear ───────────────────────────────────────────────
+
+  /// Clears only cached/transient data (watch progress, recent channels).
+  /// Preserves favorites and auth-related data.
+  Future<void> clearCacheOnly() async {
+    final keys = prefs.getKeys().toList();
+    for (final key in keys) {
+      if (key.startsWith('watch_progress_') ||
+          key.startsWith('watch_timestamp_') ||
+          key == 'recent_channels' ||
+          key == 'last_channel') {
+        await prefs.remove(key);
+      }
+    }
+    _logger.i('Preferences', 'Cache cleared (favorites preserved)');
+  }
+
   Future<void> clearAll() async {
     await prefs.clear();
     _logger.i('Preferences', 'All preferences cleared');

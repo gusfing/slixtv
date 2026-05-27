@@ -14,100 +14,121 @@ class SeriesService {
 
   SeriesService(this._client);
 
+  // ─── Internal Request Helper ───────────────────────────────────────────────
+
   Future<Map<String, dynamic>> _stalkerRequest({
     required String action,
     Map<String, String>? extraParams,
   }) async {
-    if (_client.portalUrl == null || _client.token == null) {
-      throw const AuthException(message: 'Not authenticated.');
-    }
-
-    // Use the discovered server load path from handshake, NOT raw portal URL
-    final loadPath = _client.serverLoadPath ??
-        (_client.portalUrl!.endsWith('load.php')
-            ? _client.portalUrl!
-            : '${_client.portalUrl}/server/load.php');
-
     final params = <String, String>{
-      'type': AppConfig.typeSeries,
+      'type': AppConfig.typeVod,
       'action': action,
       'JsHttpRequest': '1-xml',
-      'token': _client.token!,
       ...?extraParams,
     };
 
-    _logger.mag('SERIES_REQ', '→ $action loadPath=$loadPath');
+    _logger.mag('SERIES_REQ', '→ $action via Native Dio');
 
     try {
       final response = await _client.dio.get(
-        loadPath,
+        _client.serverLoadPath!,
         queryParameters: params,
         options: Options(
-          validateStatus: (s) => s != null && s < 500,
+          validateStatus: (s) => s != null && s < 600,
         ),
       );
 
       dynamic data = response.data;
+      final rawBody = data?.toString() ?? '';
+      final bodyPreview = rawBody.length > 300 ? rawBody.substring(0, 300) : rawBody;
+
       if (data is String) {
         try {
           data = jsonDecode(data);
-        } catch (_) {
-          _logger.e('SERIES_SERVICE', 'Failed to parse string response for $action');
-        }
+        } catch (_) {}
       }
-      if (data is Map && data.containsKey('js')) {
-        return data as Map<String, dynamic>;
+
+      if (data is Map<String, dynamic>) {
+        return data;
       }
-      return {'js': null};
+
+      final ctype = response.headers.value('content-type') ?? 'unknown';
+      final errorMsg = 'Invalid response format (status: ${response.statusCode}, type: $ctype). Preview: $bodyPreview';
+      _logger.e('SERIES_SERVICE', 'Request failed: $action - $errorMsg');
+      throw PortalException(message: errorMsg);
     } catch (e) {
+      if (e is PortalException) rethrow;
       _logger.e('SERIES_SERVICE', 'Request failed: $action', error: e);
       throw PortalException(message: 'Network error: $e');
     }
   }
 
+  // ─── Category Helpers ──────────────────────────────────────────────────────
+
+  bool _isSeriesCategory(Category cat) {
+    final title = cat.title.toLowerCase();
+    final alias = cat.alias.toLowerCase();
+    return title.contains('series') ||
+        title.contains('serial') ||
+        title.contains('drama') ||
+        title.contains('natok') ||
+        title.contains('show') ||
+        title.contains('rhyme') ||
+        title.contains('kids collection') ||
+        alias.contains('series') ||
+        alias.contains('serial') ||
+        alias.contains('drama') ||
+        alias.contains('natok') ||
+        alias.contains('show') ||
+        alias.contains('rhyme') ||
+        alias.contains('kids_collection');
+  }
+
+  // ─── Public API ────────────────────────────────────────────────────────────
+
+  /// Returns VOD categories that look like series/show categories.
   Future<List<Category>> getCategories() async {
     try {
       final response = await _stalkerRequest(action: 'get_categories');
       final js = response['js'];
-      
-      final rawList = StalkerParser.extractList(js);
-      return rawList
+      if (js == null || js == false) return [];
+
+      final rawList = StalkerParser.extractList(js is Map ? js['data'] ?? js : js);
+      final allCats = rawList
           .whereType<Map<String, dynamic>>()
           .map((e) => Category.fromJson(e))
           .toList();
+      return allCats.where(_isSeriesCategory).toList();
     } catch (e) {
-      _logger.e('SERIES_SERVICE', 'Categories failed', error: e);
+      _logger.e('SERIES_SERVICE', 'getCategories failed', error: e);
       return [];
     }
   }
 
+  /// Returns series items (is_series=1) optionally filtered by category.
   Future<List<SeriesItem>> getOrderedList({String? categoryId, int page = 1}) async {
-    final params = <String, String>{
-      'p': page.toString(),
-      'sortby': 'added',
-      'hd': '0',
-    };
-
-    if (categoryId != null && categoryId.isNotEmpty && categoryId != '*') {
-      params['category'] = categoryId;
-    }
-
     try {
+      final params = <String, String>{
+        'p': page.toString(),
+        'sortby': 'added',
+        'hd': '0',
+        'is_series': '1',
+      };
+      if (categoryId != null &&
+          categoryId.isNotEmpty &&
+          categoryId != '*' &&
+          categoryId != 'all') {
+        params['category'] = categoryId;
+      }
       final response = await _stalkerRequest(
-        action: AppConfig.stalkerGetOrderedListAction,
+        action: 'get_ordered_list',
         extraParams: params,
       );
-
       final js = response['js'];
-      
-      List items = [];
-      if (js is Map<String, dynamic> && js.containsKey('data')) {
-        items = StalkerParser.extractList(js['data']);
-      } else {
-        items = StalkerParser.extractList(js);
-      }
+      if (js == null || js == false) return [];
 
-      return items
+      final rawList = StalkerParser.extractList(js is Map ? js['data'] ?? js : js);
+      return rawList
           .whereType<Map<String, dynamic>>()
           .map((e) => SeriesItem.fromJson(e, _client))
           .toList();
@@ -117,89 +138,90 @@ class SeriesService {
     }
   }
 
+  /// Fetches episode list for a series by its parent ID (movie_id).
+  ///
+  /// Stalker returns a flat episode list when you pass movie_id=<seriesId>.
+  /// Each episode item carries a `series_num` (episode number within season)
+  /// and optionally a `season_num` or category hint.  We group by
+  /// season_num → Season → [Episode].
   Future<List<Season>> getSeriesInfo(String seriesId) async {
-    _logger.mag('SERIES_INFO', 'id=$seriesId');
+    _logger.mag('SERIES_INFO', 'id=$seriesId via Native Dio');
     try {
+      // Fetch all episodes for this parent series
       final response = await _stalkerRequest(
-        action: AppConfig.stalkerGetOrderedListAction,
+        action: 'get_ordered_list',
         extraParams: {
           'movie_id': seriesId,
+          'sortby': 'added',
         },
       );
 
       final js = response['js'];
-      if (js == null || js == false) return [];
+      if (js == null || js == false) {
+        _logger.w('SERIES_INFO', 'Empty js for series $seriesId');
+        return [];
+      }
 
-      String? seriesCmd;
-      if (js is Map<String, dynamic>) {
-        seriesCmd = js['cmd']?.toString();
+      final rawList = StalkerParser.extractList(js is Map ? js['data'] ?? js : js);
+      _logger.mag('SERIES_INFO', 'Got ${rawList.length} episode items for $seriesId');
+
+      if (rawList.isEmpty) return [];
+
+      // ── Group by season ────────────────────────────────────────────────────
+      // Episodes may have `season_num`, `s_num`, `season`, or just a numeric
+      // sequence.  Fall back to a single Season 1 if no season info exists.
+      final Map<int, List<Map<String, dynamic>>> bySeasonNum = {};
+
+      for (int i = 0; i < rawList.length; i++) {
+        final ep = rawList[i];
+        if (ep is! Map<String, dynamic>) continue;
+
+        final seasonNum = _extractSeasonNum(ep, i);
+        bySeasonNum.putIfAbsent(seasonNum, () => []).add(ep);
       }
 
       final seasons = <Season>[];
-      final flatEpisodes = <Episode>[];
+      int globalIndex = 0;
 
-      void processEpisodeList(List eps, String seasonName, int seasonNum) {
-        final parsedEps = <Episode>[];
-        for (int i = 0; i < eps.length; i++) {
-          final ep = eps[i];
-          if (ep is Map<String, dynamic>) {
-            parsedEps.add(Episode.fromJson(ep, i, _client, seriesCmd: seriesCmd));
-          }
+      for (final seasonNum in (bySeasonNum.keys.toList()..sort())) {
+        final rawEps = bySeasonNum[seasonNum]!;
+        final episodes = <Episode>[];
+
+        for (int i = 0; i < rawEps.length; i++) {
+          episodes.add(Episode.fromJson(rawEps[i], globalIndex++, _client));
         }
-        if (parsedEps.isNotEmpty) {
-          seasons.add(Season(
-            id: seasonNum.toString(),
-            name: seasonName,
-            seasonNumber: seasonNum,
-            episodes: parsedEps,
-          ));
-        }
+
+        seasons.add(Season(
+          id: seasonNum.toString(),
+          name: 'Season $seasonNum',
+          seasonNumber: seasonNum,
+          episodes: episodes,
+        ));
       }
 
-      // Scenario 1: Flat Array Directly
-      if (js is List) {
-        for (int i = 0; i < js.length; i++) {
-          if (js[i] is Map<String, dynamic>) {
-            flatEpisodes.add(Episode.fromJson(js[i], flatEpisodes.length, _client, seriesCmd: seriesCmd));
-          }
-        }
-      }
-      
-      // Scenario 2: Nested Data Array or Dictionary Mapping
-      if (js is Map<String, dynamic>) {
-        final data = js['data'];
-        
-        if (data is List) {
-          for (int i = 0; i < data.length; i++) {
-            final item = data[i];
-            if (item is Map<String, dynamic>) {
-              // Some portals nest episodes in a 'series' array inside the season object
-              final seriesSub = item['series'];
-              if (seriesSub is List) {
-                processEpisodeList(seriesSub, item['name']?.toString() ?? 'Season ${i + 1}', i + 1);
-              } else {
-                flatEpisodes.add(Episode.fromJson(item, flatEpisodes.length, _client, seriesCmd: seriesCmd));
-              }
-            }
-          }
-        } else if (data is Map) {
-          // Dictionary-mapped seasons (e.g., {"1": [...], "2": [...]})
-          data.forEach((key, value) {
-            if (value is List) {
-              final seasonNum = int.tryParse(key.toString()) ?? seasons.length + 1;
-              processEpisodeList(value, 'Season $key', seasonNum);
-            }
-          });
-        }
-      }
-
-      if (seasons.isNotEmpty) return seasons;
-      if (flatEpisodes.isNotEmpty) {
-        return [Season(id: '1', name: 'Season 1', seasonNumber: 1, episodes: flatEpisodes)];
-      }
+      seasons.sort((a, b) => a.seasonNumber.compareTo(b.seasonNumber));
+      _logger.mag('SERIES_INFO',
+          'Built ${seasons.length} season(s) for series $seriesId');
+      return seasons;
     } catch (e) {
-      _logger.e('SERIES_INFO', 'Failed for id=$seriesId', error: e);
+      _logger.e('SERIES_INFO', 'Failed for series $seriesId', error: e);
+      return [];
     }
-    return [];
+  }
+
+  /// Extracts the season number from an episode JSON map.
+  /// Falls back to 1 if no season field is present.
+  int _extractSeasonNum(Map<String, dynamic> ep, int fallbackIndex) {
+    final candidates = [
+      ep['season_num'],
+      ep['s_num'],
+      ep['season'],
+      ep['series_season'],
+    ];
+    for (final c in candidates) {
+      final n = int.tryParse(c?.toString() ?? '');
+      if (n != null && n > 0) return n;
+    }
+    return 1; // default: all episodes in Season 1
   }
 }

@@ -167,7 +167,8 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
       final streamUrl = await stalkerApi.createLink(
         ep.cmd,
         AppConfig.typeSeries,
-        seriesId: widget.series.id,
+        seriesId: ep.id,
+        itemObject: ep.rawJson,
       );
 
       if (!mounted) return;
@@ -179,6 +180,10 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
           title: widget.series.name,
           subtitle: ep.name,
           contentId: 'ep_${ep.id}',
+          videoId: widget.series.id,
+          originalCmd: ep.cmd,
+          contentType: 'series',
+          seriesId: ep.id,
         ),
       ));
     } catch (e) {

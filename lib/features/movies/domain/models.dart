@@ -15,6 +15,7 @@ class VodItem {
   final String genre;
   final String duration;
   final bool hasFiles;
+  final Map<String, dynamic>? rawJson;
 
   const VodItem({
     required this.id,
@@ -30,6 +31,7 @@ class VodItem {
     this.genre = '',
     this.duration = '',
     this.hasFiles = true,
+    this.rawJson,
   });
 
   factory VodItem.fromJson(Map<String, dynamic> json, ApiClient client) {
@@ -47,13 +49,10 @@ class VodItem {
         '';
 
     // ── CMD EXTRACTION ────────────────────────────────────────
-    // Read the raw json['cmd'] FIRST before running extractBestPlaybackCmd.
-    // We do NOT pass it through the extractor blindly — if it's a /media/ path,
-    // we skip it and try alternate fields.
+    // Use exact cmd returned by portal catalog response
     final rawJsonCmd = json['cmd']?.toString() ?? '';
     
-    // Try extracting from alternate fields (ffmpeg_cmd, stream_cmd, etc.)
-    // but explicitly exclude the raw cmd field so we can evaluate it separately.
+    // Try extracting from alternate fields if cmd is empty
     final altFields = ['ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'video_url', 'url', 'file'];
     String? altCmd;
     for (final f in altFields) {
@@ -61,17 +60,9 @@ class VodItem {
       if (v != null && v.isNotEmpty) { altCmd = v; break; }
     }
 
-    // Priority:
-    // 1. rawJsonCmd if it's a real STB stream (not /media/)
-    // 2. altCmd from alternate fields
-    // 3. rawJsonCmd even if /media/ (last resort, so the field isn't empty)
-    String cmd;
-    if (rawJsonCmd.isNotEmpty && !rawJsonCmd.startsWith('/media/')) {
-      cmd = rawJsonCmd;
-    } else if (altCmd != null && altCmd.isNotEmpty) {
+    String cmd = rawJsonCmd;
+    if (cmd.isEmpty && altCmd != null && altCmd.isNotEmpty) {
       cmd = altCmd;
-    } else {
-      cmd = rawJsonCmd; // keep /media/ as last resort so we still have something
     }
 
     print('[VOD_FROM_JSON_CMD] movieId=$movieId name=$movieName rawJsonCmd=$rawJsonCmd altCmd=$altCmd chosenCmd=$cmd');
@@ -102,6 +93,7 @@ class VodItem {
           _nonNull(json['duration']) ??
           '',
       hasFiles: hasFiles,
+      rawJson: json,
     );
   }
 
@@ -118,6 +110,7 @@ class VodItem {
     String? genre,
     String? duration,
     bool? hasFiles,
+    Map<String, dynamic>? rawJson,
   }) {
     return VodItem(
       id: id,
@@ -133,6 +126,7 @@ class VodItem {
       genre: genre ?? this.genre,
       duration: duration ?? this.duration,
       hasFiles: hasFiles ?? this.hasFiles,
+      rawJson: rawJson ?? this.rawJson,
     );
   }
 

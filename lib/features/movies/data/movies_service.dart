@@ -18,63 +18,85 @@ class MoviesService {
     required String action,
     Map<String, String>? extraParams,
   }) async {
-    if (_client.portalUrl == null || _client.token == null) {
-      throw const AuthException(message: 'Not authenticated.');
-    }
-
-    // Use the discovered server load path from handshake, NOT raw portal URL
-    final loadPath = _client.serverLoadPath ??
-        (_client.portalUrl!.endsWith('load.php')
-            ? _client.portalUrl!
-            : '${_client.portalUrl}/server/load.php');
-
     final params = <String, String>{
       'type': AppConfig.typeVod,
       'action': action,
       'JsHttpRequest': '1-xml',
-      'token': _client.token!,
       ...?extraParams,
     };
 
-    _logger.mag('MOVIES_REQ', '→ $action loadPath=$loadPath');
+    _logger.mag('MOVIES_REQ', '→ $action via Native Dio');
 
     try {
       final response = await _client.dio.get(
-        loadPath,
+        _client.serverLoadPath!,
         queryParameters: params,
         options: Options(
-          validateStatus: (s) => s != null && s < 500,
+          validateStatus: (s) => s != null && s < 600,
         ),
       );
 
       dynamic data = response.data;
+      final rawBody = data?.toString() ?? '';
+      final bodyPreview = rawBody.length > 500 ? rawBody.substring(0, 500) : rawBody;
+
+      // Log raw portal response for key actions
+      if (action == 'get_ordered_list' || action == 'get_description' || action == 'create_link') {
+        _logger.mag('RAW_RESPONSE', '[$action] ${bodyPreview.length > 200 ? bodyPreview.substring(0, 200) : bodyPreview}');
+      }
+
       if (data is String) {
         try {
           data = jsonDecode(data);
-        } catch (_) {
-          _logger.e('MOVIES_SERVICE', 'Failed to parse string response for $action');
-        }
+        } catch (_) {}
       }
-      if (data is Map && data.containsKey('js')) {
-        return data as Map<String, dynamic>;
+
+      if (data is Map<String, dynamic>) {
+        return data;
       }
-      return {'js': null};
+
+      final ctype = response.headers.value('content-type') ?? 'unknown';
+      final errorMsg = 'Invalid response format (status: ${response.statusCode}, type: $ctype). Preview: $bodyPreview';
+      _logger.e('MOVIES_SERVICE', 'Request failed: $action - $errorMsg');
+      throw PortalException(message: errorMsg);
     } catch (e) {
+      if (e is PortalException) rethrow;
       _logger.e('MOVIES_SERVICE', 'Request failed: $action', error: e);
       throw PortalException(message: 'Network error: $e');
     }
+  }
+
+  bool _isSeriesCategory(Category cat) {
+    final title = cat.title.toLowerCase();
+    final alias = cat.alias.toLowerCase();
+    return title.contains('series') ||
+        title.contains('serial') ||
+        title.contains('drama') ||
+        title.contains('natok') ||
+        title.contains('show') ||
+        title.contains('rhyme') ||
+        title.contains('kids collection') ||
+        alias.contains('series') ||
+        alias.contains('serial') ||
+        alias.contains('drama') ||
+        alias.contains('natok') ||
+        alias.contains('show') ||
+        alias.contains('rhyme') ||
+        alias.contains('kids_collection');
   }
 
   Future<List<Category>> getCategories() async {
     try {
       final response = await _stalkerRequest(action: 'get_categories');
       final js = response['js'];
+      if (js == null || js == false) return [];
       
-      final rawList = StalkerParser.extractList(js);
-      return rawList
+      final rawList = StalkerParser.extractList(js is Map ? js['data'] ?? js : js);
+      final allCats = rawList
           .whereType<Map<String, dynamic>>()
           .map((e) => Category.fromJson(e))
           .toList();
+      return allCats.where((c) => !_isSeriesCategory(c)).toList();
     } catch (e) {
       _logger.e('MOVIES_SERVICE', 'Categories failed', error: e);
       return [];
@@ -82,38 +104,26 @@ class MoviesService {
   }
 
   Future<List<VodItem>> getOrderedList({String? categoryId, int page = 1}) async {
-    final params = <String, String>{
-      'p': page.toString(),
-      'sortby': 'added',
-      'hd': '0',
-    };
-
-    if (categoryId != null && categoryId.isNotEmpty && categoryId != '*') {
-      params['category'] = categoryId;
-    }
-
     try {
+      final params = <String, String>{
+        'p': page.toString(),
+        'sortby': 'added',
+        'hd': '0',
+      };
+      if (categoryId != null && categoryId.isNotEmpty && categoryId != '*' && categoryId != 'all') {
+        params['category'] = categoryId;
+      }
       final response = await _stalkerRequest(
-        action: AppConfig.stalkerGetOrderedListAction,
+        action: 'get_ordered_list',
         extraParams: params,
       );
-
       final js = response['js'];
-      
-      List items = [];
-      if (js is Map<String, dynamic> && js.containsKey('data')) {
-        items = StalkerParser.extractList(js['data']);
-      } else {
-        items = StalkerParser.extractList(js);
-      }
+      if (js == null || js == false) return [];
 
-      return items
+      final rawList = StalkerParser.extractList(js is Map ? js['data'] ?? js : js);
+      return rawList
           .whereType<Map<String, dynamic>>()
-          .map((e) {
-            final item = VodItem.fromJson(e, _client);
-            _logger.mag('MOVIE_LIST_ITEM', 'movieId=${item.id} title=${item.name} cmd=${item.cmd}');
-            return item;
-          })
+          .map((e) => VodItem.fromJson(e, _client))
           .toList();
     } catch (e) {
       _logger.e('MOVIES_SERVICE', 'getOrderedList failed', error: e);
@@ -124,35 +134,35 @@ class MoviesService {
   Future<VodItem?> getVodInfo(VodItem item) async {
     try {
       final response = await _stalkerRequest(
-        action: 'get_info',
+        action: 'get_description',
         extraParams: {'movie_id': item.id},
       );
       
       final js = response['js'];
       if (js == null || js == false) return null;
 
-      // The cmd from ordered_list (item.cmd) is the source of truth.
-      // We ONLY override it if item.cmd is empty or /media/ AND get_info provides something better.
+      // ALWAYS prefer cmd from get_description over get_ordered_list.
+      // get_ordered_list returns simplified cmd like /media/452019.mpg
+      // get_description returns the REAL cmd like /media/file_3285742.mpg
+      final infoCmd = _extractCmdFromInfoResponse(js);
       String chosenCmd = item.cmd;
 
-      if (chosenCmd.isEmpty || chosenCmd.startsWith('/media/')) {
-        // item.cmd is bad — try to find something better in get_info
-        final infoCmd = _extractCmdFromInfoResponse(js);
-        if (infoCmd != null && infoCmd.isNotEmpty && !infoCmd.startsWith('/media/')) {
-          chosenCmd = infoCmd;
-        }
-        // If still bad, keep whatever we had (even /media/) so the field isn't null
+      _logger.mag('GETVOD_CMD_TRACE', 'movieId=${item.id} orderedListCmd=${item.cmd} descriptionCmd=$infoCmd');
+
+      if (infoCmd != null && infoCmd.isNotEmpty) {
+        // ALWAYS use description cmd — it's the real portal path
+        chosenCmd = infoCmd;
+        _logger.mag('GETVOD_CMD_OVERRIDE', 'Using description cmd: $chosenCmd (was: ${item.cmd})');
       }
 
-      // Hard failure log — so we can see exactly what happened
-      if (chosenCmd.isEmpty || chosenCmd.startsWith('/media/')) {
+      if (chosenCmd.isEmpty) {
         _logger.mag('INVALID_MOVIE_CMD', 
-          'itemCmd=${item.cmd} | infoJsCmd=${_extractCmdFromInfoResponse(js)} | chosenCmd=$chosenCmd'
+          'itemCmd=${item.cmd} | infoJsCmd=$infoCmd | chosenCmd=$chosenCmd'
         );
       }
 
       _logger.mag('MOVIE_CMD_SELECTED',
-        'orderedItemCmd=${item.cmd} | chosenCmd=$chosenCmd'
+        'orderedItemCmd=${item.cmd} | descriptionCmd=$infoCmd | chosenCmd=$chosenCmd'
       );
 
       // Use copyWith to enrich metadata from get_info WITHOUT touching cmd
@@ -179,6 +189,7 @@ class MoviesService {
               _nonNull(info['length']) ??
               _nonNull(info['duration']) ??
               item.duration,
+          rawJson: js,
         );
       }
     } catch (e) {
@@ -219,115 +230,85 @@ class MoviesService {
   }
 
   /// VOD-specific create_link engine.
-  /// Unlike Live TV, VOD ordered_list returns /media/*.mpg which is just an
-  /// identifier — NOT a real STB stream cmd. We must send it to create_link
-  /// with various payload combinations until the portal returns a real URL.
-  Future<String> createVodLink(String cmd, String movieId) async {
+  Future<String> createVodLink(VodItem movie) async {
+    final cmd = movie.cmd;
+    final movieId = movie.id;
     _logger.mag('CREATE_VOD_LINK_START', 'movieId=$movieId cmd=$cmd');
     _logger.debugState.selectedContent = 'VOD: $movieId | cmd: $cmd';
     _logger.debugState.cmd = cmd;
 
-    final ffmpegCmd = cmd.startsWith('ffmpeg ') ? cmd : 'ffmpeg $cmd';
+    // Use movie.cmd (which should already be set by getVodInfo from get_description).
+    // Fallback to rawJson['cmd'] only if movie.cmd is empty.
+    final rawCmd = cmd.isNotEmpty ? cmd : (movie.rawJson?['cmd']?.toString() ?? '');
 
-    // 5 attempts — exactly as specified, in strict order
-    final attempts = <Map<String, String>>[
-      // Attempt 1: with movie_id and download flag
-      {
-        'cmd': cmd,
-        'movie_id': movieId,
-        'download': '0',
-        'JsHttpRequest': '1-xml',
-      },
-      // Attempt 2: ffmpeg-wrapped cmd with movie_id
-      {
-        'cmd': ffmpegCmd,
-        'movie_id': movieId,
-        'download': '0',
-      },
-      // Attempt 3: no cmd at all — just movie_id (some portals ignore cmd)
-      {
-        'movie_id': movieId,
-        'download': '0',
-      },
-      // Attempt 4: full legacy VOD payload
-      {
-        'cmd': cmd,
-        'movie_id': movieId,
-        'forced_storage': '0',
-        'disable_ad': '1',
-        'download': '0',
-        'force_ch_link_check': '0',
-      },
-      // Attempt 5: Live TV-style payload — in case this provider treats VOD like ITV
-      {
-        'cmd': cmd,
-        'series': '',
-        'forced_storage': '0',
-        'disable_ad': '0',
-        'volume': '100',
-        'play_mode': '0',
-      },
-    ];
+    _logger.mag('CREATE_VOD_LINK_TRACE', 'movieId=$movieId cmd=$cmd rawJson.cmd=${movie.rawJson?['cmd']} FINAL=$rawCmd');
 
-    String? lastError;
-
-    for (int i = 0; i < attempts.length; i++) {
-      final payload = attempts[i];
-      _logger.mag('CREATE_VOD_ATTEMPT', 'attempt=${i + 1} payload=$payload');
-      _logger.debugState.requestPayload = payload.toString();
-
-      try {
-        final response = await _stalkerRequest(
-          action: AppConfig.stalkerCreateLinkAction,
-          extraParams: payload,
-        );
-
-        final js = response['js'];
-        _logger.mag('CREATE_VOD_RAW', 'attempt=${i + 1} js=$js');
-        _logger.debugState.rawResponse = js?.toString() ?? 'null';
-
-        if (js == null || js == false) {
-          lastError = 'js=null/false';
-          continue;
-        }
-
-        String streamUrl = '';
-        String errorCode = '';
-
-        if (js is Map<String, dynamic>) {
-          streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
-          errorCode = js['error']?.toString() ?? '';
-        } else if (js is String) {
-          streamUrl = js;
-        }
-
-        _logger.mag('CREATE_VOD_PARSED', 'attempt=${i + 1} streamUrl=$streamUrl error=$errorCode');
-
-        // Reject bad responses
-        if (errorCode == 'nothing_to_play') {
-          lastError = 'nothing_to_play';
-          continue;
-        }
-        if (streamUrl.isEmpty || streamUrl.startsWith('/media/')) {
-          lastError = 'unresolvable url: $streamUrl';
-          continue;
-        }
-
-        // Got something — resolve internal proxy if needed
-        return await _resolveStreamUrl(streamUrl, movieId);
-
-      } catch (e) {
-        lastError = e.toString();
-        _logger.debugState.lastError = lastError;
-        continue;
-      }
+    if (rawCmd.isEmpty) {
+      throw const PortalException(message: 'No cmd available for this movie. Portal did not provide a media path.');
     }
 
-    // All 5 attempts failed
-    _logger.mag('CREATE_VOD_FAILED', 'movieId=$movieId lastError=$lastError');
-    throw PortalException(
-      message: 'Could not resolve stream after 5 attempts. Last error: $lastError'
-    );
+    try {
+      final params = {
+        'cmd': rawCmd,
+        'series': '',
+        'forced_storage': '',
+        'disable_ad': '0',
+        'download': '0',
+        'force_ch_link_check': '0',
+      };
+      
+      _logger.mag('CREATE_VOD_LINK_PARAMS', params.toString());
+      _logger.debugState.requestPayload = params.toString();
+
+      final response = await _stalkerRequest(
+        action: 'create_link',
+        extraParams: params,
+      );
+
+      final js = response['js'];
+      final rawText = response['text']?.toString() ?? '';
+      final isTimeout = rawText.contains('Connection timeout') || rawText.contains('Failed to connect');
+
+      if (isTimeout) {
+        throw const PortalException(
+          message: 'The portal storage server is temporarily offline (Connection Timeout). Please try again later.'
+        );
+      }
+
+      if (js == null || js == false) {
+        throw const PortalException(message: 'No stream URL returned');
+      }
+
+      String streamUrl = '';
+      String errorCode = '';
+      if (js is Map<String, dynamic>) {
+        streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
+        errorCode = js['error']?.toString() ?? '';
+      } else if (js is String) {
+        streamUrl = js;
+      }
+
+      if (errorCode == 'nothing_to_play') {
+        throw const PortalException(
+          message: 'The portal is currently unable to play this item (nothing_to_play).'
+        );
+      } else if (errorCode.isNotEmpty && streamUrl.isEmpty) {
+        throw PortalException(message: 'Server error: $errorCode');
+      }
+
+      if (streamUrl.isEmpty) {
+        throw const PortalException(message: 'Resolved stream URL is empty');
+      }
+
+      _logger.mag('CREATE_VOD_RESOLVED', 'Resolved stream via Native API: $streamUrl');
+      return await _resolveStreamUrl(streamUrl, movieId);
+    } catch (e) {
+      _logger.e('CREATE_VOD_FAILED', 'movieId=$movieId error=$e');
+      if (e is PortalException) rethrow;
+      throw PortalException(
+        message: 'Could not resolve stream. Last error: $e'
+      );
+    }
   }
 
   /// Resolves internal/localhost stream URLs using the authenticated Dio session,
@@ -373,7 +354,7 @@ class MoviesService {
             ),
           );
 
-          _logger.debugState.redirects += '[${redirects}] HTTP ${resp.statusCode} - $url\n';
+          _logger.debugState.redirects += '[$redirects] HTTP ${resp.statusCode} - $url\n';
 
           final status = resp.statusCode ?? 0;
           if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {

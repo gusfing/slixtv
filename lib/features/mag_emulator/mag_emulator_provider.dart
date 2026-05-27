@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:slix_iptv/features/mag_emulator/data/models/device_identity.dart';
@@ -37,6 +38,7 @@ final deviceIdentityProvider = FutureProvider<DeviceIdentity>((ref) async {
 
 final magDioProvider = Provider<Dio>((ref) {
   final dio = Dio();
+  final sessionManager = ref.watch(sessionManagerProvider);
   // Base options — interceptors are added later by magErrorHandlerProvider
   dio.options = BaseOptions(
     connectTimeout: const Duration(seconds: 15),
@@ -44,6 +46,8 @@ final magDioProvider = Provider<Dio>((ref) {
     followRedirects: true,
     maxRedirects: 5,
   );
+  // Attach CookieManager so session cookies (PHPSESSID etc.) persist
+  dio.interceptors.add(CookieManager(sessionManager.cookieJar));
   return dio;
 });
 

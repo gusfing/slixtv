@@ -5,7 +5,6 @@ import '../../../core/constants/app_dimensions.dart';
 import '../domain/models.dart' show VodItem;
 import '../../auth/domain/providers.dart';
 import '../../player/presentation/player_screen.dart';
-import '../../../core/config/app_config.dart';
 
 /// Movie detail screen: poster, synopsis, cast, play.
 class MovieDetailScreen extends ConsumerStatefulWidget {
@@ -36,7 +35,12 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
 
     try {
       final moviesService = ref.read(moviesServiceProvider);
-      final streamUrl = await moviesService.createVodLink(movie.cmd, movie.id);
+      
+      // The vodInfoProvider watcher already tried get_description on screen load.
+      // If the cmd is still bare (/media/<id>.mpg), that IS the portal's actual cmd
+      // for this content — re-fetching get_description would waste 2 network round trips.
+      // The portal resolves the bare cmd to the real storage path internally via create_link.
+      final streamUrl = await moviesService.createVodLink(movie);
 
       if (!mounted) return;
       setState(() => _isLoadingStream = false);
@@ -47,6 +51,9 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
           title: movie.name,
           subtitle: movie.year.isNotEmpty ? movie.year : null,
           contentId: 'vod_${movie.id}',
+          videoId: movie.id,
+          originalCmd: movie.cmd,
+          contentType: 'vod',
         ),
       ));
     } catch (e) {
@@ -79,7 +86,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                       ? Image.network(
                           movie.poster,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _posterFallback(),
+                          errorBuilder: (context, error, stackTrace) => _posterFallback(),
                         )
                       : _posterFallback(),
                   const DecoratedBox(

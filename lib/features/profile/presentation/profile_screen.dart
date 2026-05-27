@@ -5,10 +5,8 @@ import '../../../core/constants/app_dimensions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/config/app_config.dart';
 import '../../auth/domain/providers.dart';
-import 'problem_inspector_screen.dart';
+import 'technical_inspector_screen.dart';
 import 'debug_dashboard.dart' as debug_dashboard;
-import '../../mag_emulator/mag_emulator_provider.dart';
-import '../../mag_emulator/presentation/screens/debug_dashboard_screen.dart';
 
 class ProfileScreen extends ConsumerWidget {
   final VoidCallback? onLogout;
@@ -83,37 +81,18 @@ class ProfileScreen extends ConsumerWidget {
           // System Diagnostics
           _section(context, 'Support & Tools', [
             _actionTile(context, 'Problem Inspector', Icons.troubleshoot_rounded, () {
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProblemInspectorScreen()));
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TechnicalInspectorScreen()));
             }, color: AppColors.primary),
-            Consumer(
-              builder: (context, ref, _) {
-                return _actionTile(context, 'Developer Tools (MAG)', Icons.developer_mode_rounded, () {
-                  final deviceIdentityAsync = ref.read(deviceIdentityProvider);
-                  if (deviceIdentityAsync.hasValue) {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => DebugDashboardScreen(
-                        deviceIdentity: deviceIdentityAsync.value!,
-                        sessionManager: ref.read(sessionManagerProvider),
-                        logger: ref.read(magLoggerProvider),
-                        playerHeadersService: ref.read(playerHeadersServiceProvider),
-                        errorHandler: ref.read(magErrorHandlerProvider),
-                      ),
-                    ));
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('MAG identity loading...')),
-                    );
-                  }
-                }, color: AppColors.textSecondary);
-              },
-            ),
+            _actionTile(context, 'Developer Tools (MAG)', Icons.developer_mode_rounded, () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TechnicalInspectorScreen()));
+            }, color: AppColors.textSecondary),
           ]),
 
           // Actions
           const SizedBox(height: AppDimensions.md),
           _actionTile(context, AppStrings.clearCache, Icons.delete_sweep, () async {
             final prefs = ref.read(preferencesProvider);
-            await prefs.clearAll();
+            await prefs.clearCacheOnly();
             if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cache cleared')));
           }),
           _actionTile(context, AppStrings.appInfo, Icons.info_outline, () {

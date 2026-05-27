@@ -1,4 +1,3 @@
-import 'package:slix_iptv/core/network/api_client.dart';
 import 'package:slix_iptv/features/auth/data/stalker_api_service.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -18,7 +17,7 @@ void main() async {
     
     File('profile_output.json').writeAsStringSync(jsonEncode(output));
     print('Done');
-  } catch (e, st) {
-    print('Error: \$e');
+  } catch (e) {
+    print('Error: $e');
   }
 }

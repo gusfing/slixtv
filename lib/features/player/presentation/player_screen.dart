@@ -5,7 +5,6 @@ import 'package:video_player/video_player.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../auth/domain/providers.dart';
-import '../../mag_emulator/mag_emulator_provider.dart';
 
 /// Premium video player screen with gesture controls and quality selection.
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -13,6 +12,10 @@ class PlayerScreen extends ConsumerStatefulWidget {
   final String title;
   final String? subtitle;
   final String? contentId;
+  final String? videoId;
+  final String? originalCmd;
+  final String? contentType;
+  final String? seriesId;
 
   const PlayerScreen({
     super.key,
@@ -20,6 +23,10 @@ class PlayerScreen extends ConsumerStatefulWidget {
     required this.title,
     this.subtitle,
     this.contentId,
+    this.videoId,
+    this.originalCmd,
+    this.contentType,
+    this.seriesId,
   });
 
   @override
@@ -49,23 +56,35 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       // Fetch authenticated headers directly from the active API session
       final apiClient = ref.read(apiClientProvider);
       final Map<String, String> headers = {
-        'User-Agent': 'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250 stbapp ver: 4 rev: 231 Safari/533.3',
-        'X-User-Agent': 'Model: MAG250; Link: WiFi',
+        'User-Agent': 'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3',
+        'X-User-Agent': 'Model: MAG250; Link: Ethernet',
         'Accept': '*/*',
         'Accept-Language': 'en_US',
         'Referer': '${apiClient.portalBase}/c/',
       };
       
+      final Map<String, String> cookies = {
+        'stb_lang': 'en',
+        'timezone': 'Europe/Kyiv',
+      };
+
       if (apiClient.macAddress != null) {
         final mac = apiClient.macAddress!;
-        headers['Cookie'] = 'mac=$mac; stb_lang=en; timezone=UTC';
+        // mac and sn must be raw (not URL-encoded) — portal matches registered MAC exactly
+        cookies['mac'] = mac;
+        if (apiClient.serialNumber != null) {
+          cookies['sn'] = apiClient.serialNumber!;
+        }
         headers['MAC'] = mac;
         headers['X-User-MAC'] = mac;
       }
       
       if (apiClient.token != null) {
         headers['Authorization'] = 'Bearer ${apiClient.token!}';
+        cookies['token'] = apiClient.token!;
       }
+
+      headers['Cookie'] = cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
 
       _logger.debugState.playerHeaders = headers.toString();
       _logger.player('Using authenticated MAG session headers for playback');
@@ -79,6 +98,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _controller!.addListener(_onPlayerUpdate);
       if (mounted) setState(() => _isInitialized = true);
       _logger.player('Player initialized successfully');
+
+      // Dispatch telemetry start log
+      if (widget.videoId != null && widget.originalCmd != null) {
+        ref.read(stalkerApiProvider).logStartPlay(
+          videoId: widget.videoId!,
+          cmd: widget.originalCmd!,
+          resolvedUrl: widget.streamUrl,
+        );
+      }
 
       // Restore watch progress if available
       if (widget.contentId != null) {
@@ -110,6 +138,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   @override
   void dispose() {
     _controller?.removeListener(_onPlayerUpdate);
+
+    // Dispatch telemetry stop log and watch progress sync
+    if (widget.videoId != null && widget.originalCmd != null) {
+      final posSeconds = _controller != null
+          ? _controller!.value.position.inSeconds
+          : 0;
+      ref.read(stalkerApiProvider).logStopPlay(
+        videoId: widget.videoId!,
+        cmd: widget.originalCmd!,
+        resolvedUrl: widget.streamUrl,
+        positionSeconds: posSeconds,
+        seriesId: widget.seriesId,
+      );
+    }
+
     _controller?.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -135,8 +178,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         onTap: _toggleControls,
         onDoubleTapDown: (details) {
           final w = MediaQuery.of(context).size.width;
-          if (details.globalPosition.dx < w / 3) _seek(-10);
-          else if (details.globalPosition.dx > w * 2 / 3) _seek(10);
+          if (details.globalPosition.dx < w / 3) {
+            _seek(-10);
+          } else if (details.globalPosition.dx > w * 2 / 3) {
+            _seek(10);
+          }
         },
         child: Stack(
           fit: StackFit.expand,

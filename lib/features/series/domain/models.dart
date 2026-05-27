@@ -74,6 +74,7 @@ class Episode {
   final String duration;
   final String poster;
   final String description;
+  final Map<String, dynamic>? rawJson;
 
   const Episode({
     required this.id,
@@ -83,6 +84,7 @@ class Episode {
     this.duration = '',
     this.poster = '',
     this.description = '',
+    this.rawJson,
   });
 
   factory Episode.fromJson(Map<String, dynamic> json, int index, ApiClient client, {String? seriesCmd}) {
@@ -111,6 +113,7 @@ class Episode {
       description: json['descr']?.toString() ??
           json['description']?.toString() ??
           '',
+      rawJson: json,
     );
   }
 }

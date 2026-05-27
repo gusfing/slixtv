@@ -104,6 +104,9 @@ class StreamResolver {
       'type': type,
       'action': 'create_link',
       'cmd': cmd, // Original cmd is usually sent
+      'forced_storage': 'undefined',
+      'disable_ad': '0',
+      'JsHttpRequest': '1-xml',
     };
     if (series != null) {
       queryParams['series'] = series;
@@ -123,6 +126,14 @@ class StreamResolver {
 
       final parsed = ResponseParser.parseResponse(response);
       final js = parsed['js'];
+      final rawText = parsed['text']?.toString() ?? '';
+      final isTimeout = rawText.contains('Connection timeout') || rawText.contains('Failed to connect');
+
+      if (isTimeout) {
+        throw StreamResolutionException(
+          'The portal storage server is temporarily offline (Connection Timeout). Please try again later.'
+        );
+      }
 
       if (js == false || js == null) {
         throw StreamResolutionException('Failed to get link data from portal');
@@ -130,7 +141,7 @@ class StreamResolver {
 
       if (js is Map && js.containsKey('error')) {
         if (js['error'] == 'nothing_to_play') {
-          throw StreamResolutionException('Nothing to play or stream is offline.');
+          throw StreamResolutionException('The portal is currently unable to play this item (nothing_to_play).');
         }
         throw StreamResolutionException('Portal error: ${js['error']}');
       }
