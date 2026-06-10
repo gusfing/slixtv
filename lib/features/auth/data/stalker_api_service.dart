@@ -55,6 +55,7 @@ class StalkerApiService {
     
     _client.updateConfig(
       stbModel: stbModel,
+      serialNumber: serialNumber,
       timezone: timezone,
       urlEncodeMac: urlEncodeMac,
     );

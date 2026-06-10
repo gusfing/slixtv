@@ -88,14 +88,17 @@ class ApiClient {
   }) {
     _portalUrl = _normalizePortalUrl(portalUrl);
     _macAddress = macAddress.toUpperCase();
-    _serialNumber = serialNumber ?? _generateSerialNumber(macAddress);
-    _logger.i('ApiClient', 'Configured: portal=$_portalUrl, mac=$_macAddress');
+    _serialNumber = (serialNumber == null || serialNumber.trim().isEmpty)
+        ? _generateSerialNumber(_macAddress)
+        : serialNumber.trim();
+    _logger.i('ApiClient', 'Configured: portal=$_portalUrl, mac=$_macAddress, sn=$_serialNumber');
   }
 
   /// Update diagnostic configs on the fly (for hot-reload/sandbox testing).
   void updateConfig({
     String? portalUrl,
     String? macAddress,
+    String? serialNumber,
     String? stbModel,
     String? connectionType,
     String? timezone,
@@ -106,7 +109,12 @@ class ApiClient {
     if (portalUrl != null) _portalUrl = _normalizePortalUrl(portalUrl);
     if (macAddress != null) {
       _macAddress = macAddress.toUpperCase();
-      _serialNumber = _generateSerialNumber(macAddress);
+      if (serialNumber == null || serialNumber.trim().isEmpty) {
+        _serialNumber = _generateSerialNumber(_macAddress);
+      }
+    }
+    if (serialNumber != null && serialNumber.trim().isNotEmpty) {
+      _serialNumber = serialNumber.trim();
     }
     if (stbModel != null) _stbModel = stbModel;
     if (connectionType != null) _connectionType = connectionType;
@@ -115,7 +123,7 @@ class ApiClient {
     if (customHeaders != null) _customHeaders = customHeaders;
     if (customCookies != null) _customCookies = customCookies;
     
-    _logger.i('ApiClient', 'Diagnostic config updated: model=$_stbModel, urlEncodeMac=$_urlEncodeMac');
+    _logger.i('ApiClient', 'Diagnostic config updated: model=$_stbModel, urlEncodeMac=$_urlEncodeMac, sn=$_serialNumber');
   }
 
   void setToken(String token) {
@@ -132,35 +140,45 @@ class ApiClient {
 
   Future<void> loadDeviceIdentity() async {
     const storage = FlutterSecureStorage();
+    final currentMac = _macAddress?.toUpperCase() ?? '';
+    
     try {
       final storedJson = await storage.read(key: 'mag_device_identity');
       if (storedJson != null) {
         final Map<String, dynamic> map = json.decode(storedJson);
-        _deviceId = map['device_id'] ?? '';
-        _deviceId2 = map['device_id2'] ?? '';
-        _signature = map['signature'] ?? '';
-        _logger.i('ApiClient', 'Loaded device identity from storage: deviceId=$_deviceId');
-        return;
+        final storedMac = map['mac']?.toString().toUpperCase() ?? '';
+        
+        if (storedMac == currentMac && currentMac.isNotEmpty) {
+          _deviceId = map['device_id'] ?? '';
+          _deviceId2 = map['device_id2'] ?? '';
+          _signature = map['signature'] ?? '';
+          _logger.i('ApiClient', 'Loaded device identity from storage for MAC $currentMac: deviceId=$_deviceId');
+          return;
+        }
       }
     } catch (e) {
       _logger.e('ApiClient', 'Failed to load device identity', error: e);
     }
 
-    final random = Random();
+    final random = Random(currentMac.isNotEmpty ? currentMac.hashCode : null);
     const chars = '0123456789abcdef';
     String genHex(int len) => List.generate(len, (index) => chars[random.nextInt(chars.length)]).join();
 
-    final macParts = [
-      '00', '1A', '79',
-      random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-      random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-      random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ];
-    final genMac = macParts.join(':').toUpperCase();
-    final genSn = genMac.replaceAll(':', '').toUpperCase();
-    final genId = genHex(32);
-    final genId2 = genHex(32);
-    final genSig = genHex(32);
+    final genMac = currentMac.isNotEmpty ? currentMac : (() {
+      final macParts = [
+        '00', '1A', '79',
+        random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+        random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+        random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ];
+      return macParts.join(':').toUpperCase();
+    })();
+    
+    final macClean = genMac.replaceAll(':', '').toUpperCase();
+    final genSn = _serialNumber ?? _generateSerialNumber(genMac);
+    final genId = generateDeterministicHex(macClean, 'device_id', 32);
+    final genId2 = generateDeterministicHex(macClean, 'device_id2', 32);
+    final genSig = generateDeterministicHex(macClean, 'signature', 32);
 
     final map = {
       'mac': genMac,
@@ -171,15 +189,17 @@ class ApiClient {
       'hw_version': '2.6.0',
       'image_version': '218',
       'stb_type': 'MAG250',
-      'model': 'MAG250',
+      'model': _stbModel,
     };
 
     try {
-      await storage.write(key: 'mag_device_identity', value: json.encode(map));
+      if (genMac.isNotEmpty) {
+        await storage.write(key: 'mag_device_identity', value: json.encode(map));
+      }
       _deviceId = genId;
       _deviceId2 = genId2;
       _signature = genSig;
-      _logger.i('ApiClient', 'Generated and stored new device identity: deviceId=$_deviceId');
+      _logger.i('ApiClient', 'Generated and stored deterministic device identity for MAC $genMac: deviceId=$_deviceId');
     } catch (e) {
       _logger.e('ApiClient', 'Failed to save generated device identity', error: e);
       _deviceId = genId;
