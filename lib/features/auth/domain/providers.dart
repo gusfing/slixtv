@@ -196,15 +196,49 @@ class AuthNotifier extends StateNotifier<AuthState> {
         );
 
         _logger.i('AUTH', 'Starting native handshake for session restore...');
-        final token = await _api.handshake(
-          activePortalUrl!,
-          macAddress,
-          stbModel: stbModel,
-          serialNumber: serialNumber,
-          timezone: timezone,
-          urlEncodeMac: urlEncodeMac,
-        );
-        final profile = await _api.getProfile();
+        String? activeSerialNumber = serialNumber;
+        String token;
+        StalkerProfile profile;
+
+        try {
+          token = await _api.handshake(
+            activePortalUrl!,
+            macAddress,
+            stbModel: stbModel,
+            serialNumber: activeSerialNumber,
+            timezone: timezone,
+            urlEncodeMac: urlEncodeMac,
+          );
+          profile = await _api.getProfile();
+        } on AuthException catch (e) {
+          final errStr = e.message.toLowerCase();
+          if (errStr.contains('serial number mismatch') || errStr.contains('device conflict') || errStr.contains('serial_number')) {
+            _logger.w('AUTH', 'Serial number mismatch detected during restore. Retrying with empty serial number...');
+            activeSerialNumber = 'EMPTY';
+            token = await _api.handshake(
+              activePortalUrl!,
+              macAddress,
+              stbModel: stbModel,
+              serialNumber: activeSerialNumber,
+              timezone: timezone,
+              urlEncodeMac: urlEncodeMac,
+            );
+            profile = await _api.getProfile();
+            
+            // Re-save with 'EMPTY' to prevent future mismatches
+            await _storage.savePortalCredentials(
+              portalUrl: portalUrl,
+              activePortalUrl: activePortalUrl,
+              macAddress: macAddress,
+              stbModel: stbModel,
+              serialNumber: 'EMPTY',
+              timezone: timezone,
+              urlEncodeMac: urlEncodeMac,
+            );
+          } else {
+            rethrow;
+          }
+        }
 
         StalkerMainInfo? mainInfo;
         try {
@@ -298,15 +332,38 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       _logger.i('AUTH', 'Starting Stalker login helper: active=$activeUrl, original=$originalUrl');
       
-      final token = await _api.handshake(
-        activeUrl,
-        macAddress,
-        stbModel: stbModel,
-        serialNumber: serialNumber,
-        timezone: timezone,
-        urlEncodeMac: urlEncodeMac,
-      );
-      final profile = await _api.getProfile();
+      String? activeSerialNumber = serialNumber;
+      String token;
+      StalkerProfile profile;
+
+      try {
+        token = await _api.handshake(
+          activeUrl,
+          macAddress,
+          stbModel: stbModel,
+          serialNumber: activeSerialNumber,
+          timezone: timezone,
+          urlEncodeMac: urlEncodeMac,
+        );
+        profile = await _api.getProfile();
+      } on AuthException catch (e) {
+        final errStr = e.message.toLowerCase();
+        if (errStr.contains('serial number mismatch') || errStr.contains('device conflict') || errStr.contains('serial_number')) {
+          _logger.w('AUTH', 'Serial number mismatch detected. Retrying with empty serial number...');
+          activeSerialNumber = 'EMPTY';
+          token = await _api.handshake(
+            activeUrl,
+            macAddress,
+            stbModel: stbModel,
+            serialNumber: activeSerialNumber,
+            timezone: timezone,
+            urlEncodeMac: urlEncodeMac,
+          );
+          profile = await _api.getProfile();
+        } else {
+          rethrow;
+        }
+      }
       
       if (!profile.status) {
         throw const AuthException(
@@ -327,7 +384,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         activePortalUrl: activeUrl,
         macAddress: macAddress,
         stbModel: stbModel,
-        serialNumber: serialNumber,
+        serialNumber: activeSerialNumber == 'EMPTY' ? '' : activeSerialNumber,
         timezone: timezone,
         urlEncodeMac: urlEncodeMac,
       );

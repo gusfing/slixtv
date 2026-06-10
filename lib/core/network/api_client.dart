@@ -90,7 +90,7 @@ class ApiClient {
     _macAddress = macAddress.toUpperCase();
     _serialNumber = (serialNumber == null || serialNumber.trim().isEmpty)
         ? _generateSerialNumber(macAddress)
-        : serialNumber.trim();
+        : (serialNumber.trim() == 'EMPTY' ? '' : serialNumber.trim());
     _logger.i('ApiClient', 'Configured: portal=$_portalUrl, mac=$_macAddress, sn=$_serialNumber');
   }
 
@@ -113,8 +113,9 @@ class ApiClient {
         _serialNumber = _generateSerialNumber(_macAddress!);
       }
     }
-    if (serialNumber != null && serialNumber.trim().isNotEmpty) {
-      _serialNumber = serialNumber.trim();
+    if (serialNumber != null) {
+      final trimmed = serialNumber.trim();
+      _serialNumber = trimmed == 'EMPTY' ? '' : trimmed;
     }
     if (stbModel != null) _stbModel = stbModel;
     if (connectionType != null) _connectionType = connectionType;
