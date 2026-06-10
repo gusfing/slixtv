@@ -2,7 +2,7 @@
 class AppStrings {
   AppStrings._();
 
-  static const String appName = 'SliX TV';
+  static const String appName = 'SFLIXTV';
   static const String appTagline = 'Premium Streaming Experience';
   static const String appVersion = '1.0.0';
 

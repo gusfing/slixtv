@@ -4,6 +4,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/storage/storage_service.dart';
 import '../../../core/utils/stalker_parser.dart';
 import 'models.dart';
 
@@ -18,6 +19,7 @@ class StalkerApiService {
   String? _portalBase;
   String? _serverLoadPath;
   bool _isAuthenticated = false;
+  List<SubtitleInfo> lastResolvedSubtitles = [];
 
   bool get isAuthenticated => _isAuthenticated;
   String? get serverLoadPath => _serverLoadPath;
@@ -34,9 +36,29 @@ class StalkerApiService {
 
   // ─── Step 1: Handshake ──────────────────────────────────
 
-  Future<String> handshake(String portalUrl, String macAddress) async {
+  Future<String> handshake(
+    String portalUrl,
+    String macAddress, {
+    String? stbModel,
+    String? serialNumber,
+    String? timezone,
+    bool? urlEncodeMac,
+  }) async {
     _logger.mag('HANDSHAKE', 'Starting with $portalUrl / $macAddress');
-    _client.configure(portalUrl: portalUrl, macAddress: macAddress);
+    _client.clearSession();
+    _client.configure(
+      portalUrl: portalUrl,
+      macAddress: macAddress,
+      serialNumber: serialNumber,
+    );
+    await _client.loadDeviceIdentity();
+    
+    _client.updateConfig(
+      stbModel: stbModel,
+      timezone: timezone,
+      urlEncodeMac: urlEncodeMac,
+    );
+
     _portalBase = _client.portalUrl;
 
     _serverLoadPath = await _discoverEndpoint();
@@ -55,7 +77,38 @@ class StalkerApiService {
         throw const AuthException(message: 'Handshake response missing token');
       }
 
-      final token = js['token']?.toString() ?? '';
+      if (js is Map<String, dynamic>) {
+        if (js.containsKey('error') && js['error'] != null) {
+          throw AuthException(message: js['error'].toString());
+        }
+        if (js.containsKey('msg') && js['msg'] != null) {
+          final msg = js['msg'].toString();
+          final blockMsg = js['block_msg']?.toString() ?? '';
+          final cleanBlockMsg = blockMsg.replaceAll(RegExp(r'<[^>]*>'), '\n');
+          throw AuthException(
+            message: cleanBlockMsg.isNotEmpty 
+              ? '$msg\n$cleanBlockMsg' 
+              : msg
+          );
+        }
+      }
+
+      if (js is List && js.isEmpty) {
+        throw const AuthException(
+          message: 'The portal returned an empty handshake response.\n'
+              'Please verify that your MAC address is active and registered on this portal.'
+        );
+      }
+
+      String token = '';
+      if (js is Map<String, dynamic>) {
+        token = js['token']?.toString() ?? '';
+      } else if (js is List && js.isNotEmpty) {
+        try {
+          token = js[0]['token']?.toString() ?? '';
+        } catch (_) {}
+      }
+
       if (token.isEmpty) {
         throw const AuthException(message: 'Empty token from handshake');
       }
@@ -66,6 +119,10 @@ class StalkerApiService {
       return token;
     } catch (e) {
       _logger.e('MAG', 'Handshake failed', error: e);
+      // Clear endpoint cache on failure so we rediscover next time
+      try {
+        PreferencesService().saveDiscoveredEndpoint(portalUrl, '');
+      } catch (_) {}
       if (e is AuthException) rethrow;
       throw AuthException(message: 'Handshake failed: $e');
     }
@@ -74,64 +131,99 @@ class StalkerApiService {
   Future<String> _discoverEndpoint() async {
     final base = _portalBase!;
     
-    // Normalize base — remove trailing slashes and known load.php suffixes
-    String cleanBase = base;
-    if (cleanBase.endsWith('/server/load.php')) {
-      cleanBase = cleanBase.substring(0, cleanBase.length - '/server/load.php'.length);
-    } else if (cleanBase.endsWith('/load.php')) {
-      cleanBase = cleanBase.substring(0, cleanBase.length - '/load.php'.length);
+    // Check cache first to avoid rate limits (429)
+    try {
+      final cached = PreferencesService().getDiscoveredEndpoint(base);
+      if (cached != null && cached.isNotEmpty) {
+        _logger.mag('DISCOVER', 'Using cached endpoint: $cached');
+        return cached;
+      }
+    } catch (e) {
+      _logger.w('DISCOVER', 'Failed to read endpoint cache: $e');
     }
-    if (cleanBase.endsWith('/')) {
+
+    // Resolve redirects of the base URL first
+    String resolvedBase = base;
+    try {
+      _logger.mag('DISCOVER', 'Checking redirects for base: $base');
+      final probeResponse = await _client.dio.get(
+        base,
+        options: Options(
+          followRedirects: true,
+          maxRedirects: 5,
+          validateStatus: (s) => true,
+        ),
+      );
+      if (probeResponse.realUri.toString().isNotEmpty) {
+        final finalUri = probeResponse.realUri;
+        final resolvedUrl = '${finalUri.scheme}://${finalUri.host}${finalUri.hasPort && finalUri.port != 80 && finalUri.port != 443 ? ':${finalUri.port}' : ''}';
+        if (resolvedUrl != base) {
+          _logger.mag('DISCOVER', 'Portal URL redirects from $base to $resolvedUrl');
+          resolvedBase = resolvedUrl;
+          _client.updateConfig(portalUrl: resolvedBase);
+          _portalBase = _client.portalUrl;
+        }
+      }
+    } catch (e) {
+      _logger.w('DISCOVER', 'Failed to resolve base URL redirects: $e');
+    }
+
+    // Normalize base — remove trailing slashes and known suffixes
+    String cleanBase = resolvedBase;
+    // Strip known path suffixes to get the bare domain
+    for (final suffix in [
+      '/stalker_portal/server/load.php',
+      '/server/load.php',
+      '/load.php',
+      '/portal.php',
+      '/stalker_portal/c/',
+      '/stalker_portal/c',
+      '/stalker_portal/',
+      '/stalker_portal',
+      '/c/',
+      '/c',
+    ]) {
+      if (cleanBase.toLowerCase().endsWith(suffix)) {
+        cleanBase = cleanBase.substring(0, cleanBase.length - suffix.length);
+        break;
+      }
+    }
+    while (cleanBase.endsWith('/')) {
       cleanBase = cleanBase.substring(0, cleanBase.length - 1);
     }
 
     // Common stalker portal endpoint paths (in priority order)
-    final paths = [
-      '$cleanBase/stalker_portal/server/load.php',
-      '$cleanBase/server/load.php',
-      '$cleanBase/load.php',
-      '$cleanBase/stalker_portal/c/fake_auth.js',      // some portals
-      '$cleanBase/portal.php',                           // some custom portals
+    // Covers: Ministra, Stalker Middleware, MAG portals, custom setups
+    final pathSuffixes = [
+      '/stalker_portal/server/load.php',
+      '/server/load.php',
+      '/portal.php',
+      '/load.php',
+      '/c/server/load.php',
     ];
 
-    for (final path in paths) {
-      try {
-        _logger.mag('DISCOVER', 'Trying: $path');
-        final response = await _client.dio.get(
-          path,
-          queryParameters: {
-            'type': AppConfig.typeStb,
-            'action': AppConfig.stalkerHandshakeAction,
-            'prehash': '0',
-            'JsHttpRequest': '1-xml',
-          },
-          options: Options(
-            validateStatus: (s) => s != null && s < 500,
-            receiveTimeout: const Duration(seconds: 8),
-            sendTimeout: const Duration(seconds: 8),
-          ),
-        );
+    // Try each path with the original scheme first
+    for (final suffix in pathSuffixes) {
+      final path = '$cleanBase$suffix';
+      final result = await _probeEndpoint(path);
+      if (result != null) {
+        _saveEndpointCache(base, result);
+        return result;
+      }
+    }
 
-        if (response.statusCode == 429) {
-          throw const AuthException(
-              message: 'Rate limited. Please wait a moment and try again.');
+    // If HTTP failed, try HTTPS as fallback (only if user entered HTTP)
+    final uri = Uri.tryParse(cleanBase);
+    if (uri != null && uri.scheme == 'http') {
+      final httpsBase = cleanBase.replaceFirst('http://', 'https://');
+      _logger.mag('DISCOVER', 'HTTP paths failed, trying HTTPS fallback...');
+      for (final suffix in pathSuffixes) {
+        final path = '$httpsBase$suffix';
+        final result = await _probeEndpoint(path);
+        if (result != null) {
+          _saveEndpointCache(base, result);
+          return result;
         }
-        if (response.statusCode == 200) {
-          dynamic data = response.data;
-          if (data is String) {
-            try {
-              data = jsonDecode(data);
-            } catch (_) {}
-          }
-          if (data is Map && data.containsKey('js')) {
-            _logger.mag('DISCOVER', 'Found: $path');
-            return path;
-          }
-        }
-      } on AuthException {
-        rethrow;
-      } catch (_) {
-        continue;
       }
     }
 
@@ -141,7 +233,82 @@ class StalkerApiService {
     return fallback;
   }
 
+  Future<void> _saveEndpointCache(String base, String path) async {
+    try {
+      await PreferencesService().saveDiscoveredEndpoint(base, path);
+    } catch (e) {
+      _logger.w('DISCOVER', 'Failed to cache endpoint: $e');
+    }
+  }
+
+  /// Probes a single endpoint URL using a lightweight GET request.
+  /// Sends a minimal request (no handshake) to check if the endpoint exists.
+  /// Returns the working URL or null if this endpoint is not valid.
+  Future<String?> _probeEndpoint(String path) async {
+    try {
+      _logger.mag('DISCOVER', 'Probing: $path');
+      final response = await _client.dio.get(
+        path,
+        queryParameters: {
+          'type': AppConfig.typeStb,
+          'action': 'get_main_info',
+          'JsHttpRequest': '1-xml',
+        },
+        options: Options(
+          validateStatus: (s) => s != null && s < 500,
+          receiveTimeout: const Duration(seconds: 8),
+          sendTimeout: const Duration(seconds: 8),
+        ),
+      );
+
+      if (response.statusCode == 429) {
+        throw const AuthException(
+            message: 'Rate limited. Please wait a moment and try again.');
+      }
+      if (response.statusCode == 200) {
+        dynamic data = response.data;
+        if (data is String) {
+          try {
+            data = jsonDecode(data);
+          } catch (_) {}
+        }
+        if (data is Map && data.containsKey('js')) {
+          _logger.mag('DISCOVER', 'Found: $path');
+          return path;
+        }
+      }
+    } on AuthException {
+      rethrow;
+    } catch (e) {
+      _logger.mag('DISCOVER', 'Probe failed for $path: $e');
+    }
+    return null;
+  }
+
   // ─── Step 2: Profile ────────────────────────────────────
+
+  String? _parseRedirectBase(String url) {
+    if (url.isEmpty) return null;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    
+    String path = uri.path;
+    final serverIndex = path.indexOf('/server/');
+    if (serverIndex != -1) {
+      path = path.substring(0, serverIndex);
+    } else {
+      final loadIndex = path.indexOf('/load.php');
+      if (loadIndex != -1) {
+        path = path.substring(0, loadIndex);
+      }
+    }
+    
+    final authority = uri.hasPort && uri.port != 80 && uri.port != 443 
+        ? '${uri.host}:${uri.port}' 
+        : uri.host;
+    
+    return '${uri.scheme}://$authority$path';
+  }
 
   Future<StalkerProfile> getProfile() async {
     final response = await _stalkerRequest(
@@ -159,6 +326,14 @@ class StalkerApiService {
     final blocked = js['blocked'];
 
     if (status == 2 || status == '2') {
+      final launcherProfileUrl = js['launcher_profile_url']?.toString() ?? '';
+      if (launcherProfileUrl.isNotEmpty) {
+        final redirectUrl = _parseRedirectBase(launcherProfileUrl);
+        if (redirectUrl != null) {
+          throw StalkerRedirectException(redirectUrl: redirectUrl);
+        }
+      }
+
       throw const AuthException(
         message: 'MAC address not registered on this portal.\n'
             'Please check your MAC address or contact your IPTV provider.',
@@ -188,6 +363,44 @@ class StalkerApiService {
     } catch (e) {
       _logger.w('API', 'get_main_info not fully supported by this portal: $e');
       return const StalkerMainInfo(serverName: 'Stalker Portal');
+    }
+  }
+
+  Future<void> setParentPassword(String newPassword) async {
+    try {
+      final res = await _stalkerRequest(
+        type: AppConfig.typeStb,
+        action: 'settings_set',
+        extraParams: {
+          'parent_password': newPassword,
+          'parent_pass': newPassword,
+        },
+      );
+      final js = res['js'];
+      if (js == null || js == false) {
+        throw Exception('Server rejected settings_set');
+      }
+    } catch (e) {
+      _logger.w('API', 'settings_set failed, trying account/set_parent_password: $e');
+      try {
+        final res2 = await _stalkerRequest(
+          type: 'account',
+          action: 'set_parent_password',
+          extraParams: {
+            'password': newPassword,
+            'parent_password': newPassword,
+            'pass': newPassword,
+            'repeat_pass': newPassword,
+          },
+        );
+        final js2 = res2['js'];
+        if (js2 == null || js2 == false) {
+          throw Exception('Server rejected set_parent_password');
+        }
+      } catch (e2) {
+        _logger.e('API', 'Failed to update parent password on server', error: e2);
+        throw Exception('Stalker server rejected the password change request.');
+      }
     }
   }
 
@@ -297,39 +510,101 @@ class StalkerApiService {
     return {'items': [], 'total': 0, 'pages': 0};
   }
 
+  Future<Map<String, dynamic>> resolveEpisodeFileResponse({
+    required String seriesId,
+    required String episodeId,
+    String? seasonId,
+  }) async {
+    _logger.mag('API', 'Resolving episode file response for seriesId=$seriesId, episodeId=$episodeId, seasonId=$seasonId');
+    try {
+      return await _stalkerRequest(
+        type: AppConfig.typeVod,
+        action: 'get_ordered_list',
+        extraParams: {
+          'movie_id': seriesId,
+          if (seasonId != null && seasonId.isNotEmpty) 'season_id': seasonId,
+          'episode_id': episodeId,
+        },
+      );
+    } catch (e) {
+      _logger.e('API', 'Failed to resolve episode file response', error: e);
+      return {};
+    }
+  }
+
   // ─── Step 5: Specific Content Fetchers ──────────────────
 
   Future<List<Channel>> getAllChannels() async {
-    final response = await _stalkerRequest(
-      type: AppConfig.typeItv,
-      action: AppConfig.stalkerGetAllChannelsAction,
-    );
-    final js = response['js'];
-    if (js == null || js == false) return [];
-
-    List? raw;
-    if (js is Map<String, dynamic>) {
-      final rawData = js['data'];
-      if (rawData is List) { raw = rawData; }
-      else if (rawData is Map) { raw = rawData.values.toList(); }
-    } else if (js is List) {
-      raw = js;
+    // Try get_all_channels first (works on many portals)
+    try {
+      final response = await _stalkerRequest(
+        type: AppConfig.typeItv,
+        action: AppConfig.stalkerGetAllChannelsAction,
+      );
+      final js = response['js'];
+      if (js != null && js != false) {
+        List? raw;
+        if (js is Map<String, dynamic>) {
+          final rawData = js['data'];
+          if (rawData is List) { raw = rawData; }
+          else if (rawData is Map) { raw = rawData.values.toList(); }
+        } else if (js is List) {
+          raw = js;
+        }
+        if (raw != null && raw.isNotEmpty) {
+          final channels = raw.whereType<Map<String, dynamic>>()
+              .map((e) => Channel.fromJson(e, client: _client))
+              .toList();
+          if (channels.isNotEmpty) {
+            _logger.mag('CHANNELS', 'get_all_channels returned ${channels.length} channels');
+            return channels;
+          }
+        }
+      }
+    } catch (e) {
+      _logger.w('CHANNELS', 'get_all_channels not supported, falling back to paginated fetch: $e');
     }
-    if (raw == null || raw.isEmpty) return [];
 
-    return raw.whereType<Map<String, dynamic>>()
-        .map((e) => Channel.fromJson(e, client: _client))
-        .toList();
+    // Fallback: paginate through get_ordered_list to collect ALL channels
+    _logger.mag('CHANNELS', 'Falling back to paginated get_ordered_list for all channels');
+    return _fetchAllChannelsPaginated(categoryId: null);
   }
 
-  Future<List<Channel>> getChannels({String? categoryId, int page = 1}) async {
-    final result = await getOrderedList(
-        type: AppConfig.typeItv, categoryId: categoryId,
-        page: page, sortBy: 'number');
-    return (result['items'] as List)
-        .whereType<Map<String, dynamic>>()
-        .map((e) => Channel.fromJson(e, client: _client))
-        .toList();
+  /// Fetches ALL channels for a category by paginating through get_ordered_list.
+  Future<List<Channel>> getChannels({String? categoryId}) async {
+    return _fetchAllChannelsPaginated(categoryId: categoryId);
+  }
+
+  /// Internal helper: fetches all pages of channels via get_ordered_list.
+  Future<List<Channel>> _fetchAllChannelsPaginated({String? categoryId}) async {
+    final allChannels = <Channel>[];
+    int page = 1;
+    const maxPages = 50; // Safety limit
+
+    while (page <= maxPages) {
+      final result = await getOrderedList(
+        type: AppConfig.typeItv,
+        categoryId: categoryId,
+        page: page,
+        sortBy: 'number',
+      );
+
+      final items = (result['items'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map((e) => Channel.fromJson(e, client: _client))
+          .toList();
+
+      allChannels.addAll(items);
+
+      final totalPages = result['pages'] as int? ?? 1;
+      _logger.mag('CHANNELS', 'Page $page/$totalPages: got ${items.length} channels (total so far: ${allChannels.length})');
+
+      if (page >= totalPages || items.isEmpty) break;
+      page++;
+    }
+
+    _logger.mag('CHANNELS', 'Paginated fetch complete: ${allChannels.length} total channels');
+    return allChannels;
   }
 
   Future<List<EpgProgram>> getEpg(String channelId) async {
@@ -358,27 +633,205 @@ class StalkerApiService {
     }
   }
 
+  Future<List<EpgProgram>> getSimpleEpg(String channelId) async {
+    try {
+      final response = await _stalkerRequest(
+        type: AppConfig.typeItv,
+        action: 'get_simple_epg',
+        extraParams: {'ch_id': channelId},
+      );
+      final js = response['js'];
+      if (js == null || js == false || (js is List && js.isEmpty) || (js is Map && (js['data'] == null || js['data'].isEmpty))) {
+        throw Exception('get_simple_epg not supported or returned empty');
+      }
+      List? data;
+      if (js is Map<String, dynamic>) {
+        final rawData = js['data'];
+        if (rawData is List) { data = rawData; }
+        else if (rawData is Map) { data = rawData.values.toList(); }
+      } else if (js is List) {
+        data = js;
+      }
+      if (data == null || data.isEmpty) throw Exception('No EPG data');
+      return data.whereType<Map<String, dynamic>>()
+          .map((e) => EpgProgram.fromJson(e))
+          .toList();
+    } catch (_) {
+      // Fallback: call get_short_epg with size=120 to get a large history/future list for Catch-Up!
+      try {
+        final response = await _stalkerRequest(
+          type: AppConfig.typeItv,
+          action: 'get_short_epg',
+          extraParams: {'ch_id': channelId, 'size': '120'},
+        );
+        final js = response['js'];
+        if (js == null || js == false) return [];
+        List? data;
+        if (js is Map<String, dynamic>) {
+          final rawData = js['data'];
+          if (rawData is List) { data = rawData; }
+          else if (rawData is Map) { data = rawData.values.toList(); }
+        } else if (js is List) {
+          data = js;
+        }
+        if (data == null) return [];
+        return data.whereType<Map<String, dynamic>>()
+            .map((e) => EpgProgram.fromJson(e))
+            .toList();
+      } catch (e) {
+        _logger.e('API', 'Failed to fetch short EPG fallback for channel $channelId', error: e);
+        return [];
+      }
+    }
+  }
+
+
   // ─── Step 6: Stream Resolution ──────────────────────────
+
+  CreateLinkException _buildCreateLinkException(String message, String? portalError) {
+    final netLogs = _logger.networkRequests;
+    if (netLogs.isNotEmpty) {
+      final lastLog = netLogs.last; // The create_link request log captured by interceptor
+      return CreateLinkException(
+        message: message,
+        url: lastLog.url,
+        method: lastLog.method,
+        queryParams: lastLog.queryParams,
+        requestBody: lastLog.requestBody,
+        requestHeaders: lastLog.requestHeaders,
+        cookiesSent: lastLog.requestCookies,
+        responseStatusCode: lastLog.responseStatus,
+        responseHeaders: lastLog.responseHeaders,
+        rawResponseBody: lastLog.rawResponseBody,
+        portalError: portalError,
+      );
+    }
+    return CreateLinkException(
+      message: message,
+      url: _serverLoadPath ?? '',
+      method: 'GET',
+      queryParams: {},
+      requestBody: null,
+      requestHeaders: {},
+      cookiesSent: '',
+      responseHeaders: {},
+      rawResponseBody: '',
+      portalError: portalError,
+    );
+  }
 
   /// Resolves a MAG cmd string to a playable stream URL via create_link.
   ///
   /// The cmd from get_ordered_list (e.g. /media/464066.mpg or ffmpeg http://...)
   /// must be sent to create_link which returns the actual resolved stream URL.
-  Future<String> createLink(String cmd, String type, {String? seriesId, Map<String, dynamic>? itemObject}) async {
+  String _extractNumericId(String s) {
+    final match = RegExp(r'\d+').firstMatch(s);
+    return match != null ? match.group(0)! : '';
+  }
+
+  /// Resolves a MAG cmd string to a playable stream URL via create_link.
+  ///
+  /// The cmd from get_ordered_list (e.g. /media/464066.mpg or ffmpeg http://...)
+  /// must be sent to create_link which returns the actual resolved stream URL.
+  Future<String> createLink(
+    String cmd,
+    String type, {
+    String? seriesId,
+    Map<String, dynamic>? itemObject,
+    String? parentSeriesId,
+    String? archiveStart,
+    String? archiveDuration,
+  }) async {
+    lastResolvedSubtitles = [];
+    if (cmd.isEmpty) {
+      throw Exception("Episode cmd missing");
+    }
     final reqType = (type == AppConfig.typeSeries) ? AppConfig.typeVod : type;
-    _logger.mag('CREATE_LINK', 'type=$type (reqType=$reqType) cmd=$cmd seriesId=$seriesId');
+    _logger.mag('CREATE_LINK', 'type=$type (reqType=$reqType) cmd=$cmd seriesId=$seriesId parentSeriesId=$parentSeriesId archiveStart=$archiveStart archiveDuration=$archiveDuration');
     
     // Diagnostic: Capture starting state
     _logger.debugState.selectedContent = 'Type: $type | Cmd: $cmd';
     _logger.debugState.cmd = cmd;
     _logger.debugState.cleanedCmd = UrlNormalizer.stripPlayerDirectives(cmd);
 
+    String resolvedCmd = cmd;
+    if ((type == AppConfig.typeSeries || reqType == AppConfig.typeVod) &&
+        !resolvedCmd.startsWith('http') &&
+        !resolvedCmd.startsWith('rtsp') &&
+        !resolvedCmd.startsWith('/media/file_')) {
+      _logger.mag('CREATE_LINK', 'Intercepted catalog cmd: $resolvedCmd. Resolving file ID...');
+      try {
+        final parentId = parentSeriesId ?? _extractNumericId(resolvedCmd);
+        if (parentId.isNotEmpty) {
+          if (type == AppConfig.typeSeries && itemObject != null) {
+            // It's a Series Episode
+            final episodeId = itemObject['id']?.toString() ?? '';
+            final seasonId = itemObject['season_id']?.toString() ?? '';
+            if (episodeId.isNotEmpty) {
+              _logger.mag('CREATE_LINK', 'Querying get_ordered_list for series episode file: parent=$parentId, season=$seasonId, episode=$episodeId');
+              final listRes = await _stalkerRequest(
+                type: reqType,
+                action: 'get_ordered_list',
+                extraParams: {
+                  'movie_id': parentId,
+                  if (seasonId.isNotEmpty) 'season_id': seasonId,
+                  'episode_id': episodeId,
+                },
+              );
+              final listJs = listRes['js'];
+              if (listJs != null && listJs != false) {
+                final rawList = StalkerParser.extractList(listJs is Map ? listJs['data'] ?? listJs : listJs);
+                if (rawList.isNotEmpty) {
+                  final firstItem = rawList.first;
+                  if (firstItem is Map<String, dynamic>) {
+                    final fileId = firstItem['id']?.toString();
+                    if (fileId != null && fileId.isNotEmpty) {
+                      resolvedCmd = '/media/file_$fileId.mpg';
+                      _logger.mag('CREATE_LINK', 'Resolved series episode to: $resolvedCmd');
+                    }
+                  }
+                }
+              }
+            } else {
+              _logger.w('CREATE_LINK', 'Cannot resolve series episode: episodeId is missing in itemObject: $itemObject');
+            }
+          } else {
+            // It's a Movie
+            _logger.mag('CREATE_LINK', 'Querying get_ordered_list for movie file: movie_id=$parentId');
+            final listRes = await _stalkerRequest(
+              type: reqType,
+              action: 'get_ordered_list',
+              extraParams: {
+                'movie_id': parentId,
+              },
+            );
+            final listJs = listRes['js'];
+            if (listJs != null && listJs != false) {
+              final rawList = StalkerParser.extractList(listJs is Map ? listJs['data'] ?? listJs : listJs);
+              if (rawList.isNotEmpty) {
+                final firstItem = rawList.first;
+                if (firstItem is Map<String, dynamic>) {
+                  final fileId = firstItem['id']?.toString();
+                  if (fileId != null && fileId.isNotEmpty) {
+                    resolvedCmd = '/media/file_$fileId.mpg';
+                    _logger.mag('CREATE_LINK', 'Resolved movie to: $resolvedCmd');
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        _logger.e('CREATE_LINK', 'Failed to resolve file command in createLink', error: e);
+      }
+    }
+
     String streamUrl = '';
 
     final params = {
-      'cmd': cmd,
+      'cmd': resolvedCmd,
       if (reqType == AppConfig.typeVod) ...{
-        'series': seriesId ?? '',
+        'series': resolvedCmd.startsWith('/media/file_') ? '' : (seriesId ?? ''),
         'forced_storage': '',
         'disable_ad': '0',
         'download': '0',
@@ -388,20 +841,24 @@ class StalkerApiService {
         'disable_ad': '0',
         'volume': '100',
         'play_mode': '0',
+        if (archiveStart != null) 'series': archiveStart,
+        if (archiveDuration != null) 'duration': archiveDuration,
       }
     };
     _logger.debugState.requestPayload = params.toString();
 
+    final actualReqType = (archiveStart != null) ? 'tv_archive' : reqType;
+
     Map<String, dynamic> response;
     try {
       response = await _stalkerRequest(
-        type: reqType,
+        type: actualReqType,
         action: AppConfig.stalkerCreateLinkAction,
         extraParams: params,
       );
     } catch (e) {
       _logger.debugState.lastError = e.toString();
-      throw PortalException(message: 'Stream request failed: $e');
+      throw _buildCreateLinkException('Stream request failed: $e', 'network_error');
     }
 
     final js = response['js'];
@@ -411,13 +868,14 @@ class StalkerApiService {
     _logger.debugState.rawResponse = js?.toString() ?? 'null';
 
     if (isTimeout) {
-      throw const PortalException(
-        message: 'The portal storage server is temporarily offline (Connection Timeout). Please try again later.'
+      throw _buildCreateLinkException(
+        'The portal storage server is temporarily offline (Connection Timeout). Please try again later.',
+        'connection_timeout'
       );
     }
 
     if (js == null || js == false) {
-      throw const PortalException(message: 'No stream data received from portal');
+      throw _buildCreateLinkException('No stream data received from portal', 'empty_response');
     }
 
     String errorCode = '';
@@ -425,16 +883,28 @@ class StalkerApiService {
     if (js is Map<String, dynamic>) {
       streamUrl = js['cmd']?.toString() ?? js['url']?.toString() ?? '';
       errorCode = js['error']?.toString() ?? '';
+      final rawSubs = js['subtitles'];
+      if (rawSubs is List) {
+        for (final sub in rawSubs) {
+          if (sub is Map<String, dynamic>) {
+            try {
+              lastResolvedSubtitles.add(SubtitleInfo.fromJson(sub, baseUrl: _portalBase ?? _client.portalBase));
+            } catch (_) {}
+          }
+        }
+      }
     } else if (js is String) {
       streamUrl = js;
     }
 
     if (errorCode == 'nothing_to_play') {
-      throw const PortalException(
-          message: 'This content is currently unavailable on the server.\nPlease try another title.');
+      throw _buildCreateLinkException(
+          'This content is currently unavailable on the server.\nPlease try another title.',
+          'nothing_to_play'
+      );
     }
     if (errorCode.isNotEmpty && streamUrl.isEmpty) {
-      throw PortalException(message: 'Server error: $errorCode');
+      throw _buildCreateLinkException('Server error: $errorCode', errorCode);
     }
 
     streamUrl = UrlNormalizer.stripPlayerDirectives(streamUrl);
@@ -442,8 +912,13 @@ class StalkerApiService {
     // If it's an internal portal URL (e.g. localhost proxy), we MUST resolve it through our authenticated session.
     if (streamUrl.contains('localhost') || streamUrl.contains('127.0.0.1')) {
       final portalUri = Uri.tryParse(_client.portalUrl ?? '');
-      if (portalUri != null) {
-        streamUrl = streamUrl.replaceAll('localhost', portalUri.host).replaceAll('127.0.0.1', portalUri.host);
+      final streamUri = Uri.tryParse(streamUrl);
+      if (portalUri != null && streamUri != null) {
+        streamUrl = streamUri.replace(
+          scheme: portalUri.scheme,
+          host: portalUri.host,
+          port: portalUri.hasPort ? portalUri.port : null,
+        ).toString();
       }
       
       _logger.mag('RESOLVE_STREAM', 'Resolving internal stream via authenticated session: $streamUrl');
@@ -687,7 +1162,7 @@ class StalkerApiService {
       }
 
       if (data is Map<String, dynamic>) {
-        _logger.mag('RESPONSE', '← $action js=${data['js']?.runtimeType}');
+        _logger.mag('RESPONSE', '← $action js=${data['js']?.runtimeType} data=$data');
         return data;
       }
 

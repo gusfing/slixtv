@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SliX TV | Remote Config Admin Control Panel</title>
+    <!-- Premium Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Chart.js for High-end Metrics Charting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #08080C;
+            --surface-color: rgba(17, 17, 28, 0.65);
+            --surface-border: rgba(255, 255, 255, 0.08);
+            --primary: #8B5CF6; /* Neon Violet */
+            --primary-glow: rgba(139, 92, 246, 0.35);
+            --secondary: #06B6D4; /* Cyber Cyan */
+            --secondary-glow: rgba(6, 182, 212, 0.3);
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --text-main: #F3F4F6;
+            --text-secondary: #9CA3AF;
+            --text-hint: #6B7280;
+            --font-display: 'Outfit', sans-serif;
+            --font-sans: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-sans);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 85% 70%, rgba(6, 182, 212, 0.06) 0%, transparent 45%);
+            background-attachment: fixed;
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        header {
+            border-bottom: 1px solid var(--surface-border);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            background: rgba(8, 8, 12, 0.8);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.25rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-badge {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-display);
+            font-weight: 900;
+            font-size: 1.5rem;
+            color: white;
+            box-shadow: 0 4px 20px var(--primary-glow);
+        }
+
+        .logo-text {
+            font-family: var(--font-display);
+            font-weight: 800;
+            font-size: 1.5rem;
+            letter-spacing: 0.5px;
+            background: linear-gradient(to right, #FFFFFF, #D1D5DB);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-tag {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--secondary);
+            font-weight: 700;
+            margin-top: 2px;
+        }
+
+        .status-pill {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+            width: 100%;
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .glass-panel {
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            border-radius: 20px;
+            padding: 2rem;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            border-color: rgba(139, 92, 246, 0.2);
+        }
+
+        .panel-title {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: linear-gradient(135deg, #FFF 30%, #D1D5DB 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .panel-title svg {
+            color: var(--primary);
+            flex-shrink: 0;
+        }
+
+        /* Form styling */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"],
+        input[type="url"],
+        textarea,
+        select {
+            width: 100%;
+            background: rgba(8, 8, 12, 0.6);
+            border: 1px solid var(--surface-border);
+            border-radius: 12px;
+            padding: 0.85rem 1rem;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            transition: all 0.25s ease;
+            outline: none;
+        }
+
+        input[type="text"]:focus,
+        input[type="url"]:focus,
+        textarea:focus,
+        select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 12px var(--primary-glow);
+            background: rgba(8, 8, 12, 0.8);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        /* Toggles and Radio */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--surface-border);
+            padding: 1rem 1.25rem;
+            border-radius: 16px;
+            margin-bottom: 1.5rem;
+            transition: background 0.3s ease;
+        }
+
+        .toggle-container:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .toggle-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .toggle-label {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text-main);
+        }
+
+        .toggle-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 52px;
+            height: 28px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 34px;
+            border: 1px solid var(--surface-border);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: var(--text-secondary);
+            transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--primary);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(24px);
+            background-color: white;
+            box-shadow: 0 0 8px var(--primary-glow);
+        }
+
+        /* Announcement Types Buttons */
+        .type-selector {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .type-card {
+            border: 1px solid var(--surface-border);
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px;
+            padding: 0.75rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .type-card:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .type-card.selected[data-type="info"] {
+            border-color: var(--secondary);
+            background: rgba(6, 182, 212, 0.1);
+            color: #22D3EE;
+        }
+
+        .type-card.selected[data-type="warning"] {
+            border-color: var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+            color: #FBBF24;
+        }
+
+        .type-card.selected[data-type="promo"] {
+            border-color: var(--primary);
+            background: rgba(139, 92, 246, 0.1);
+            color: #C084FC;
+        }
+
+        .type-icon {
+            font-size: 1.25rem;
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--primary) 0%, #7C3AED 100%);
+            color: white;
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 1.05rem;
+            border: none;
+            border-radius: 14px;
+            padding: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 20px var(--primary-glow);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--primary-glow);
+            filter: brightness(1.1);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        /* Right Panel styling (Analytics & Live Preview) */
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .live-preview-box {
+            background: #020204;
+            border: 2px dashed rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        .preview-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-hint);
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        .app-mockup {
+            background: #0A0A0E;
+            border: 1px solid var(--surface-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        /* In-App push mockup banner */
+        .preview-banner {
+            width: 100%;
+            background: rgba(25, 25, 35, 0.85);
+            border: 1px solid var(--surface-border);
+            border-radius: 14px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-4px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .preview-banner-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+
+        .preview-banner-icon.info {
+            background: rgba(6, 182, 212, 0.15);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            color: var(--secondary);
+        }
+
+        .preview-banner-icon.warning {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: var(--warning);
+        }
+
+        .preview-banner-icon.promo {
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            color: var(--primary);
+        }
+
+        .preview-banner-content {
+            flex: 1;
+        }
+
+        .preview-banner-title {
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: white;
+            margin-bottom: 2px;
+        }
+
+        .preview-banner-message {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            line-height: 1.3;
+        }
+
+        .preview-banner-close {
+            color: var(--text-hint);
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        .preview-empty {
+            color: var(--text-hint);
+            font-size: 0.9rem;
+            font-style: italic;
+        }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        .chart-card {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--surface-border);
+            border-radius: 16px;
+            padding: 1.25rem;
+            height: 220px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .chart-label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .chart-val {
+            font-size: 1.1rem;
+            font-family: var(--font-display);
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        /* Toast Popup notifications */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #10B981;
+            color: white;
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            transform: translateY(150px);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 1000;
+            font-weight: 600;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+        }
+
+        footer {
+            margin-top: auto;
+            text-align: center;
+            padding: 2rem;
+            font-size: 0.8rem;
+            color: var(--text-hint);
+            border-top: 1px solid var(--surface-border);
+        }
+
+        /* SVG Icon alignments */
+        .panel-title svg,
+        .btn svg,
+        .toast svg {
+            width: 20px;
+            height: 20px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-container">
+            <div class="logo-section">
+                <div class="logo-badge">S</div>
+                <div>
+                    <h1 class="logo-text">SliX TV</h1>
+                    <p class="logo-tag">Remote Dashboard</p>
+                </div>
+            </div>
+            <div class="status-pill">
+                <div class="status-dot"></div>
+                <span>Server Online</span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left Column: Input Forms -->
+        <div class="glass-panel">
+            <h2 class="panel-title">
+                <svg viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                Remote Settings Controller
+            </h2>
+
+            <form id="configForm" onsubmit="saveConfig(event)">
+                <!-- ─── Announcements / Push Alerts Section ─── -->
+                <div style="margin-bottom: 2rem; border-bottom: 1px solid var(--surface-border); padding-bottom: 1.5rem;">
+                    <div class="toggle-container">
+                        <div class="toggle-info">
+                            <span class="toggle-label">Push Announcement</span>
+                            <span class="toggle-desc">Show dynamic banner inside the app in real-time</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="notifyShow" onchange="updatePreview()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Announcement Type</label>
+                        <div class="type-selector">
+                            <div class="type-card selected" data-type="info" onclick="selectType('info')">
+                                <span class="type-icon">ℹ️</span>
+                                <span>Information</span>
+                            </div>
+                            <div class="type-card" data-type="warning" onclick="selectType('warning')">
+                                <span class="type-icon">⚠️</span>
+                                <span>System Alert</span>
+                            </div>
+                            <div class="type-card" data-type="promo" onclick="selectType('promo')">
+                                <span class="type-icon">🎉</span>
+                                <span>Special Offer</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notifyTitle">Announcement Title</label>
+                        <input type="text" id="notifyTitle" placeholder="e.g. Server Maintenance Notice" oninput="updatePreview()">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notifyMessage">Message Body</label>
+                        <textarea id="notifyMessage" placeholder="Type your detailed message here..." oninput="updatePreview()"></textarea>
+                    </div>
+                </div>
+
+                <!-- ─── App Updates / Build Versioning Section ─── -->
+                <div style="margin-bottom: 2rem;">
+                    <h3 style="font-size: 1rem; color: var(--text-secondary); margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 0.5px;">Remote Update Settings</h3>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="latestVersion">Latest App Version</label>
+                            <input type="text" id="latestVersion" placeholder="1.0.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="minVersion">Minimum Allowed Version</label>
+                            <input type="text" id="minVersion" placeholder="1.0.0">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="updateUrl">Update Download URL (.apk)</label>
+                        <input type="url" id="updateUrl" placeholder="https://sflixtv.net/app-release.apk">
+                    </div>
+
+                    <div class="toggle-container">
+                        <div class="toggle-info">
+                            <span class="toggle-label">Enforce Force Update</span>
+                            <span class="toggle-desc">Lock app screen completely if app version is outdated</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="forceUpdate">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn">
+                    <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                    Save & Deploy Config
+                </button>
+            </form>
+        </div>
+
+        <!-- Right Column: Live Mock Preview & Charts -->
+        <div class="right-column">
+            <!-- In-App Mock Rendering -->
+            <div class="glass-panel live-preview-box">
+                <div class="preview-header">
+                    <span>In-App Real-time Mockup</span>
+                    <span style="color: var(--secondary); display:flex; align-items:center; gap:4px;">
+                        <span class="status-dot" style="width:6px; height:6px; background-color:var(--secondary); box-shadow:0 0 6px var(--secondary);"></span>
+                        Live Preview
+                    </span>
+                </div>
+
+                <div class="app-mockup" id="appMockup">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Sleek Performance Charts -->
+            <div class="charts-container">
+                <div class="glass-panel chart-card">
+                    <div class="chart-header">
+                        <span class="chart-label">Notification Impressions</span>
+                        <span class="chart-val" id="mockViews">342 active</span>
+                    </div>
+                    <div style="position: relative; height: 130px; width: 100%;">
+                        <canvas id="viewsChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel chart-card">
+                    <div class="chart-header">
+                        <span class="chart-label">Platform Distribution</span>
+                        <span class="chart-val" id="platformCount">3 platforms</span>
+                    </div>
+                    <div style="position: relative; height: 130px; width: 100%;">
+                        <canvas id="platformChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Success Toast Popups -->
+    <div id="saveToast" class="toast">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        <span>Settings successfully deployed to app!</span>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 SliX TV IPTV Inc. Engineered for absolute performance and microsecond real-time configuration.</p>
+    </footer>
+
+    <script>
+        let currentType = 'info';
+        let viewsChart, platformChart;
+
+        // Fetch config on load
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchConfig();
+            initCharts();
+        });
+
+        // Fetch current settings from backend
+        function fetchConfig() {
+            fetch('/api/config')
+                .then(res => res.json())
+                .then(config => {
+                    document.getElementById('notifyShow').checked = config.notification.show;
+                    document.getElementById('notifyTitle').value = config.notification.title;
+                    document.getElementById('notifyMessage').value = config.notification.message;
+                    
+                    selectType(config.notification.type || 'info');
+
+                    document.getElementById('latestVersion').value = config.latestVersion;
+                    document.getElementById('minVersion').value = config.minVersion;
+                    document.getElementById('updateUrl').value = config.updateUrl;
+                    document.getElementById('forceUpdate').checked = config.forceUpdate;
+
+                    updatePreview();
+                })
+                .catch(err => console.error('Failed to load configuration:', err));
+        }
+
+        // Save current settings to server
+        function saveConfig(e) {
+            e.preventDefault();
+
+            const config = {
+                minVersion: document.getElementById('minVersion').value.trim() || '1.0.0',
+                latestVersion: document.getElementById('latestVersion').value.trim() || '1.0.0',
+                updateUrl: document.getElementById('updateUrl').value.trim() || 'https://sflixtv.net/app-release.apk',
+                forceUpdate: document.getElementById('forceUpdate').checked,
+                notification: {
+                    id: String(Date.now()),
+                    title: document.getElementById('notifyTitle').value.trim(),
+                    message: document.getElementById('notifyMessage').value.trim(),
+                    type: currentType,
+                    show: document.getElementById('notifyShow').checked
+                }
+            };
+
+            const isLocal = window.location.hostname === 'localhost' || 
+                            window.location.hostname === '127.0.0.1' || 
+                            window.location.hostname.startsWith('192.168.') ||
+                            window.location.hostname.startsWith('10.');
+
+            if (!isLocal) {
+                // Show modal for Vercel/serverless deployments
+                showVercelModal(JSON.stringify(config, null, 2));
+                return;
+            }
+
+            fetch('/api/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(err => {
+                console.error('Save failed:', err);
+                // Fallback to showing copy-modal even on local failures
+                showVercelModal(JSON.stringify(config, null, 2));
+            });
+        }
+
+        // Announcement type card click handler
+        function selectType(type) {
+            currentType = type;
+            document.querySelectorAll('.type-card').forEach(card => {
+                card.classList.remove('selected');
+                if (card.dataset.type === type) {
+                    card.classList.add('selected');
+                }
+            });
+            updatePreview();
+        }
+
+        // Live App mockup preview update logic
+        function updatePreview() {
+            const show = document.getElementById('notifyShow').checked;
+            const title = document.getElementById('notifyTitle').value.trim();
+            const message = document.getElementById('notifyMessage').value.trim();
+            const container = document.getElementById('appMockup');
+
+            if (!show || (!title && !message)) {
+                container.innerHTML = '<span class="preview-empty">No active announcement showing</span>';
+                return;
+            }
+
+            let typeIcon = 'ℹ️';
+            if (currentType === 'warning') typeIcon = '⚠️';
+            else if (currentType === 'promo') typeIcon = '🎉';
+
+            container.innerHTML = `
+                <div class="preview-banner">
+                    <div class="preview-banner-icon ${currentType}">
+                        ${typeIcon}
+                    </div>
+                    <div class="preview-banner-content">
+                        <div class="preview-banner-title">${title || 'Announcement Title'}</div>
+                        <div class="preview-banner-message">${message || 'Type message body inside input panel...'}</div>
+                    </div>
+                    <div class="preview-banner-close" onclick="closeMockup()">✕</div>
+                </div>
+            `;
+        }
+
+        function closeMockup() {
+            document.getElementById('notifyShow').checked = false;
+            updatePreview();
+        }
+
+        // Show Toast banner
+        function showToast() {
+            const toast = document.getElementById('saveToast');
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Initializing high-end Chart.js visualizations
+        function initCharts() {
+            // Linear impressions chart
+            const ctxViews = document.getElementById('viewsChart').getContext('2d');
+            viewsChart = new Chart(ctxViews, {
+                type: 'line',
+                data: {
+                    labels: ['10am', '11am', '12pm', '1pm', '2pm', '3pm', '4pm', '5pm'],
+                    datasets: [{
+                        label: 'Active Views',
+                        data: [120, 185, 230, 210, 245, 290, 310, 342],
+                        borderColor: '#8B5CF6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#6B7280', font: { size: 9 } } },
+                        y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#6B7280', font: { size: 9 } } }
+                    }
+                }
+            });
+
+            // Donut chart of platforms
+            const ctxPlatform = document.getElementById('platformChart').getContext('2d');
+            platformChart = new Chart(ctxPlatform, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Android TV', 'Mobile', 'Fire TV'],
+                    datasets: [{
+                        data: [65, 25, 10],
+                        backgroundColor: ['#06B6D4', '#8B5CF6', '#10B981'],
+                        borderColor: '#08080C',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#9CA3AF', font: { size: 9 } }
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        // Vercel deployment helpers
+        function showVercelModal(jsonString) {
+            document.getElementById('vercelJsonText').value = jsonString;
+            document.getElementById('vercelModal').style.display = 'flex';
+        }
+
+        function closeVercelModal() {
+            document.getElementById('vercelModal').style.display = 'none';
+        }
+
+        function copyVercelJson() {
+            const textarea = document.getElementById('vercelJsonText');
+            textarea.select();
+            document.execCommand('copy');
+            
+            // Show toast
+            const toast = document.getElementById('saveToast');
+            const originalText = toast.querySelector('span').innerText;
+            toast.querySelector('span').innerText = 'JSON configuration copied to clipboard!';
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.querySelector('span').innerText = originalText;
+                }, 400);
+            }, 3000);
+        }
+    </script>
+
+    <!-- Vercel Deployment Copy Dialog -->
+    <div id="vercelModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); z-index: 1000; justify-content: center; align-items: center;">
+        <div class="glass-panel" style="width: 90%; max-width: 600px; padding: 2.5rem; border: 1px solid var(--surface-border); background: #0A0A0F; box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 20px; text-align: left;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h3 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; color: white;">🚀 Deploy to Vercel (Production)</h3>
+                <span onclick="closeVercelModal()" style="color: var(--text-secondary); cursor: pointer; font-size: 1.5rem; font-weight: bold; line-height: 1;">✕</span>
+            </div>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.25rem; line-height: 1.5;">
+                Vercel serverless hosting is read-only. To deploy your new configuration remotely, copy the JSON below and update the <strong>config.json</strong> file in your GitHub repository. Vercel will automatically redeploy the changes in seconds!
+            </p>
+            <textarea id="vercelJsonText" readonly style="width: 100%; height: 160px; font-family: monospace; font-size: 0.85rem; background: #020204; border: 1px solid var(--surface-border); border-radius: 12px; padding: 0.85rem; color: #06B6D4; margin-bottom: 1.5rem; outline: none; resize: none;"></textarea>
+            <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 1rem;">
+                <button onclick="copyVercelJson()" class="btn" style="padding: 0.9rem; font-size: 0.95rem;">
+                    <svg viewBox="0 0 24 24" style="width:16px; height:16px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    Copy JSON Config
+                </button>
+                <button onclick="closeVercelModal()" class="btn" style="background: rgba(255,255,255,0.03); color: var(--text-main); border: 1px solid var(--surface-border); box-shadow: none; padding: 0.9rem; font-size: 0.95rem;">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "minVersion": "1.0.0",
+  "latestVersion": "1.0.0",
+  "updateUrl": "https://sflixtv.net/app-release.apk",
+  "forceUpdate": true,
+  "notification": {
+    "id": "1780059816932",
+    "title": "Welcome to SliX TV!",
+    "message": "Premium IPTV streaming with a Netflix-like user experience. Let us know your feedback!",
+    "type": "warning",
+    "show": true
+  }
+}

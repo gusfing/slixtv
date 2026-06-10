@@ -30,6 +30,18 @@ class PlayerHeadersService {
     if (deviceIdentity.serialNumber.isNotEmpty) {
       cookies['sn'] = Uri.encodeComponent(deviceIdentity.serialNumber);
     }
+    if (deviceIdentity.deviceId.isNotEmpty) {
+      cookies['device_id'] = deviceIdentity.deviceId;
+      headers['device_id'] = deviceIdentity.deviceId;
+    }
+    if (deviceIdentity.deviceId2.isNotEmpty) {
+      cookies['device_id2'] = deviceIdentity.deviceId2;
+      headers['device_id2'] = deviceIdentity.deviceId2;
+    }
+    if (deviceIdentity.signature.isNotEmpty) {
+      cookies['signature'] = deviceIdentity.signature;
+      headers['signature'] = deviceIdentity.signature;
+    }
 
     final bearerToken = sessionManager.getBearerToken();
     if (bearerToken != null && bearerToken.isNotEmpty) {

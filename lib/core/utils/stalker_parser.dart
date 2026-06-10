@@ -40,7 +40,10 @@ class StalkerParser {
     String filesCmd = '';
 
     String? checkMap(Map map) {
-      final fields = ['cmd', 'ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'url', 'file', 'video_url'];
+      final fields = [
+        'cmd', 'ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'url', 'file', 'video_url',
+        'movie_link', 'movie_url', 'path', 'uri', 'link'
+      ];
       for (final f in fields) {
         final val = map[f]?.toString();
         if (val != null && val.isNotEmpty) {

@@ -44,15 +44,38 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Decompilation & emulation tools/assets
-StbEmu (Pro) vv2.0.21.00 (Patched).apk
-decompiled_sources/
-jadx-cli/
-stb_js/
-stalker_web_tester/
+# Screenshots and media
+screenshot*.png
+emulator_screenshot.png
+
+# APKs
+*.apk
+
+# Temporary files and reports
+*report.json
+categories_output.json
+categories_report.json
+old_series.txt
+test_output.txt
 test_output_targeted.txt
 test_output_targeted_utf8.txt
-test_output.txt
-test_raw.dart
-test_api.dart
+window_dump_current.xml
+recovered_edit_*.txt
 
+# Tooling and decompiled directories
+/android/build/
+/azul_iptv/
+/decompiled_base_apk/
+/decompiled_base_res/
+/decompiled_sources/
+/jadx-cli/
+/remote_config_server/
+/scratch/
+/stalker_web_tester/
+
+# Local scripts
+/analyze_report.js
+/check_all_series_categories.dart
+/find_file_id.dart
+/patch_series.js
+/scratch_stb_emulator/

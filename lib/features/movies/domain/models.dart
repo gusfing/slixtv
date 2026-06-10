@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/stalker_parser.dart';
 
@@ -35,6 +36,10 @@ class VodItem {
   });
 
   factory VodItem.fromJson(Map<String, dynamic> json, ApiClient client) {
+    final movieJson = json;
+    debugPrint('CATALOG_MOVIE_JSON: ${movieJson}');
+    debugPrint('FULL_MOVIE_JSON: $movieJson');
+
     final poster = PosterResolver.resolve(json, client);
     
     // has_files=1 means content is available on the streaming server
@@ -49,23 +54,23 @@ class VodItem {
         '';
 
     // ── CMD EXTRACTION ────────────────────────────────────────
-    // Use exact cmd returned by portal catalog response
-    final rawJsonCmd = json['cmd']?.toString() ?? '';
-    
-    // Try extracting from alternate fields if cmd is empty
-    final altFields = ['ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'video_url', 'url', 'file'];
-    String? altCmd;
-    for (final f in altFields) {
-      final v = json[f]?.toString();
-      if (v != null && v.isNotEmpty) { altCmd = v; break; }
+    // Use exact cmd returned by portal catalog response directly
+    String cmd = '';
+    if (movieJson.containsKey('cmd') && movieJson['cmd'] != null) {
+      cmd = movieJson['cmd'].toString();
+    } else {
+      // Try extracting from alternate fields if cmd is empty
+      final altFields = ['ffmpeg_cmd', 'stream_cmd', 'stream_url', 'play_url', 'video_url', 'url', 'file'];
+      for (final f in altFields) {
+        final v = json[f]?.toString();
+        if (v != null && v.isNotEmpty) {
+          cmd = v;
+          break;
+        }
+      }
     }
 
-    String cmd = rawJsonCmd;
-    if (cmd.isEmpty && altCmd != null && altCmd.isNotEmpty) {
-      cmd = altCmd;
-    }
-
-    print('[VOD_FROM_JSON_CMD] movieId=$movieId name=$movieName rawJsonCmd=$rawJsonCmd altCmd=$altCmd chosenCmd=$cmd');
+    debugPrint('[VOD_FROM_JSON_CMD] movieId=$movieId name=$movieName chosenCmd=$cmd');
 
     return VodItem(
       id: movieId,

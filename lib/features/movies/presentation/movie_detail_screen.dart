@@ -1,12 +1,15 @@
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
+import '../../../core/network/api_client.dart';
 import '../domain/models.dart' show VodItem;
 import '../../auth/domain/providers.dart';
 import '../../player/presentation/player_screen.dart';
+import '../../auth/data/models.dart' show SubtitleInfo;
 
-/// Movie detail screen: poster, synopsis, cast, play.
 class MovieDetailScreen extends ConsumerStatefulWidget {
   final VodItem movie;
 
@@ -31,16 +34,15 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
       return;
     }
 
-    setState(() { _isLoadingStream = true; _streamError = null; });
+    setState(() {
+      _isLoadingStream = true;
+      _streamError = null;
+    });
 
     try {
       final moviesService = ref.read(moviesServiceProvider);
-      
-      // The vodInfoProvider watcher already tried get_description on screen load.
-      // If the cmd is still bare (/media/<id>.mpg), that IS the portal's actual cmd
-      // for this content — re-fetching get_description would waste 2 network round trips.
-      // The portal resolves the bare cmd to the real storage path internally via create_link.
       final streamUrl = await moviesService.createVodLink(movie);
+      final subtitles = moviesService.lastResolvedSubtitles;
 
       if (!mounted) return;
       setState(() => _isLoadingStream = false);
@@ -54,240 +56,298 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
           videoId: movie.id,
           originalCmd: movie.cmd,
           contentType: 'vod',
+          externalSubtitles: subtitles,
+          poster: movie.poster,
         ),
       ));
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString().replaceAll('Exception: ', '').replaceAll('PortalException: ', '');
-      setState(() { _isLoadingStream = false; _streamError = msg; });
+      setState(() {
+        _isLoadingStream = false;
+        _streamError = msg;
+      });
     }
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
-    // Try to get richer info — fall back to passed-in data if not available or js=false
+    // Watch rich description info (returns fallback if not loaded)
     final vodInfo = ref.watch(vodInfoProvider(widget.movie));
     final enriched = vodInfo.whenOrNull(data: (info) => info);
     final movie = enriched ?? widget.movie;
+    final favorites = ref.watch(favoritesProvider);
+    final isLiked = favorites['movies']?.contains(movie.id) ?? false;
+
+    // Join metadata for the premium horizontal display
+    final metadataParts = [
+      if (movie.year.isNotEmpty) movie.year,
+      if (movie.duration.isNotEmpty) '${movie.duration} min',
+      if (movie.genre.isNotEmpty && movie.genre != 'null') movie.genre,
+    ];
+    final metadataString = metadataParts.join('   •   ');
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 320,
-            pinned: true,
-            backgroundColor: AppColors.background,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  movie.poster.isNotEmpty
-                      ? Image.network(
-                          movie.poster,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.background,
+              AppColors.backgroundLight,
+            ],
+          ),
+        ),
+        child: Stack(
+          children: [
+            // Background image blurred overlay
+            Positioned.fill(
+              child: movie.poster.isNotEmpty
+                  ? ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 15.0, sigmaY: 15.0),
+                      child: Opacity(
+                        opacity: 0.15,
+                        child: CachedNetworkImage(
+                          imageUrl: movie.poster,
+                          httpHeaders: ApiClient().getStalkerHeaders(),
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => _posterFallback(),
-                        )
-                      : _posterFallback(),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: [0.4, 1.0],
-                        colors: [Colors.transparent, AppColors.background],
+                        ),
+                      ),
+                    )
+                  : const SizedBox(),
+            ),
+
+            SafeArea(
+              child: Column(
+                children: [
+                  // App bar (Standard Left-aligned Back, Right-aligned Favorite)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_rounded, color: Colors.white, size: 20),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: Icon(
+                            isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                            color: isLiked ? Colors.red : Colors.white,
+                            size: 22,
+                          ),
+                          onPressed: () {
+                            ref.read(favoritesProvider.notifier).toggleFavorite('movies', movie.id);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Main Horizontal side-by-side details layout (Fits in single viewport!)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Left Pane: Cover Poster & Rating (Sized for TV)
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 120,
+                                height: 180,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.white12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.5),
+                                      blurRadius: 8,
+                                    ),
+                                  ],
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(7),
+                                  child: movie.poster.isNotEmpty
+                                      ? CachedNetworkImage(
+                                          imageUrl: movie.poster,
+                                          httpHeaders: ApiClient().getStalkerHeaders(),
+                                          fit: BoxFit.cover,
+                                          errorWidget: (_, __, ___) => const Icon(Icons.movie, size: 48, color: Colors.white24),
+                                        )
+                                      : const Icon(Icons.movie, size: 48, color: Colors.white24),
+                                ),
+                              ),
+                              if (movie.rating.isNotEmpty && movie.rating != '0' && movie.rating != '0.0') ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      movie.rating,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(width: 24),
+
+                          // Right Pane: Movie Info, Cast, Synopsis (Synopsis scrollable internally)
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Title
+                                Text(
+                                  movie.name,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 6),
+
+                                // Horizontal Metadata row
+                                if (metadataString.isNotEmpty) ...[
+                                  Text(
+                                    metadataString,
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+
+                                // Compact Cast / Director details
+                                if (movie.director.isNotEmpty && movie.director != 'null') ...[
+                                  Text(
+                                    'Director: ${movie.director}',
+                                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 2),
+                                ],
+                                if (movie.actors.isNotEmpty && movie.actors != 'null') ...[
+                                  Text(
+                                    'Cast: ${movie.actors}',
+                                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+
+                                // Error message if any
+                                if (_streamError != null) ...[
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.error.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: AppColors.error.withOpacity(0.5)),
+                                    ),
+                                    child: Text(
+                                      _streamError!,
+                                      style: const TextStyle(color: AppColors.error, fontSize: 11),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+
+                                // Scrollable Synopsis
+                                const Text(
+                                  'PLOT SUMMARY',
+                                  style: TextStyle(
+                                    color: AppColors.primary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(right: 8.0),
+                                      child: Text(
+                                        movie.description.isNotEmpty && movie.description != 'null'
+                                            ? movie.description
+                                            : 'No plot synopsis is available for this title.',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 12.5,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+
+                                // Action Watch Now Row
+                                Row(
+                                  children: [
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: movie.hasFiles ? AppColors.primary : Colors.grey,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      icon: _isLoadingStream
+                                          ? const SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                            )
+                                          : const Icon(Icons.play_arrow_rounded, size: 18),
+                                      label: Text(
+                                        _isLoadingStream
+                                            ? 'RESOLVING STREAM...'
+                                            : movie.hasFiles
+                                                ? 'WATCH NOW'
+                                                : 'UNAVAILABLE',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5),
+                                      ),
+                                      onPressed: movie.cmd.isEmpty || !movie.hasFiles ? null : () => _playMovie(movie),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-
-          SliverPadding(
-            padding: const EdgeInsets.all(AppDimensions.md),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                // Title
-                Text(
-                  movie.name,
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineSmall
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-
-                // Metadata badges
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    if (movie.year.isNotEmpty && movie.year != 'null')
-                      _badge(movie.year),
-                    if (movie.rating.isNotEmpty &&
-                        movie.rating != 'null' &&
-                        movie.rating != '0' &&
-                        movie.rating != '0.0')
-                      _badge('⭐ ${movie.rating}'),
-                    if (movie.duration.isNotEmpty && movie.duration != 'null')
-                      _badge('⏱ ${movie.duration} min'),
-                    if (movie.genre.isNotEmpty && movie.genre != 'null')
-                      _badge(movie.genre),
-                    if (!movie.hasFiles)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppColors.error.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                          border: Border.all(color: AppColors.error.withValues(alpha: 0.5)),
-                        ),
-                        child: const Text('Unavailable',
-                            style: TextStyle(fontSize: 12, color: AppColors.error)),
-                      ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // Error message
-                if (_streamError != null)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.error.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                      border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline, color: AppColors.error, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _streamError!,
-                            style: const TextStyle(color: AppColors.error, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // Play button
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: movie.cmd.isEmpty ? null : () => _playMovie(movie),
-                    icon: _isLoadingStream
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2),
-                          )
-                        : Icon(
-                            movie.hasFiles
-                                ? Icons.play_arrow_rounded
-                                : Icons.play_disabled,
-                            size: 26,
-                          ),
-                    label: Text(
-                      _isLoadingStream
-                          ? 'Resolving stream...'
-                          : movie.hasFiles
-                              ? 'Play Movie'
-                              : 'Not Available',
-                      style:
-                          const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: movie.hasFiles
-                          ? AppColors.primary
-                          : AppColors.surface,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppDimensions.radiusMd),
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Synopsis
-                if (movie.description.isNotEmpty &&
-                    movie.description != 'null') ...[
-                  Text('Synopsis',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  Text(
-                    movie.description,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: AppColors.textSecondary, height: 1.5),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-
-                // Cast & Crew
-                if (movie.director.isNotEmpty && movie.director != 'null')
-                  _infoRow('Director', movie.director),
-                if (movie.actors.isNotEmpty && movie.actors != 'null')
-                  _infoRow('Cast', movie.actors),
-
-                const SizedBox(height: 80),
-              ]),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
-
-  Widget _posterFallback() => Container(
-        color: AppColors.surface,
-        child: const Center(
-          child: Icon(Icons.movie, color: AppColors.textTertiary, size: 64),
-        ),
-      );
-
-  Widget _badge(String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Text(text,
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-      );
-
-  Widget _infoRow(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 72,
-              child: Text(label,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textTertiary)),
-            ),
-            Expanded(
-              child: Text(value,
-                  style: const TextStyle(
-                      fontSize: 13, color: AppColors.textSecondary)),
-            ),
-          ],
-        ),
-      );
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/stalker_parser.dart';
 
@@ -13,6 +14,7 @@ class SeriesItem {
   final String director;
   final String actors;
   final String seriesCount;
+  final String cmd;
 
   const SeriesItem({
     required this.id,
@@ -26,6 +28,7 @@ class SeriesItem {
     this.director = '',
     this.actors = '',
     this.seriesCount = '',
+    this.cmd = '',
   });
 
   factory SeriesItem.fromJson(Map<String, dynamic> json, ApiClient client) {
@@ -48,6 +51,7 @@ class SeriesItem {
           json['count']?.toString() ??
           json['episode_count']?.toString() ??
           '',
+      cmd: json['cmd']?.toString() ?? '',
     );
   }
 }
@@ -75,6 +79,8 @@ class Episode {
   final String poster;
   final String description;
   final Map<String, dynamic>? rawJson;
+  final bool isLocked;
+  final String seriesNumber;
 
   const Episode({
     required this.id,
@@ -85,24 +91,70 @@ class Episode {
     this.poster = '',
     this.description = '',
     this.rawJson,
+    this.isLocked = false,
+    this.seriesNumber = '',
   });
 
   factory Episode.fromJson(Map<String, dynamic> json, int index, ApiClient client, {String? seriesCmd}) {
+    debugPrint('RAW_EPISODE_JSON: $json');
+
     final poster = PosterResolver.resolve(json, client);
-    
-    // Utilize the robust extractor for the episode object itself
-    String cmd = StalkerParser.extractBestPlaybackCmd(json, null) ?? '';
-    if (cmd.isEmpty && seriesCmd != null && seriesCmd.isNotEmpty) {
-      cmd = seriesCmd;
+
+    // The portal returns file items with is_file=true.
+    // These have an 'id' that is the file ID, and a 'cmd' that is a direct HTTP URL.
+    // create_link ONLY works with /media/file_<fileId>.mpg format — NOT with the
+    // raw HTTP cmd from the catalog. So if this is a file item, use its id to build
+    // the proper cmd. This is the same approach that fixed movies.
+    final fileId = json['id']?.toString() ?? '';
+    final isFile = json['is_file'] == true ||
+        json['is_file'] == 'true' ||
+        json['is_file'] == 1 ||
+        json['is_file'] == '1';
+
+    String cmd;
+    if (isFile && fileId.isNotEmpty) {
+      // Use /media/file_<id>.mpg — this is what create_link expects
+      cmd = '/media/file_$fileId.mpg';
+    } else {
+      // Not a file item: try cmd/movie_url fields first
+      String? foundCmd;
+      for (final k in ['cmd', 'movie_url']) {
+        final val = json[k]?.toString();
+        if (val != null && val.trim().isNotEmpty && !val.startsWith('http')) {
+          // Only use non-HTTP cmd values — HTTP values from the catalog fail create_link
+          foundCmd = val;
+          break;
+        }
+      }
+      cmd = foundCmd ?? '';
+    }
+
+    // Extract series_number for the create_link 'series' parameter
+    final seriesNum = json['series_number']?.toString() ??
+        json['series_num']?.toString() ??
+        json['episode_num']?.toString() ??
+        '';
+
+    final nameStr = json['name']?.toString() ??
+        json['title']?.toString() ??
+        'Episode ${index + 1}';
+
+    int? parsedEpNum;
+    if (nameStr.isNotEmpty) {
+      final regExp = RegExp(r'(?:episode|ep|ep\.|e)\s*(\d+)', caseSensitive: false);
+      final match = regExp.firstMatch(nameStr);
+      if (match != null) {
+        parsedEpNum = int.tryParse(match.group(1) ?? '');
+      }
     }
 
     return Episode(
-      id: json['id']?.toString() ?? index.toString(),
-      name: json['name']?.toString() ??
-          json['title']?.toString() ??
-          'Episode ${index + 1}',
+      id: fileId.isNotEmpty ? fileId : index.toString(),
+      name: nameStr,
       cmd: cmd,
-      episodeNumber: int.tryParse(json['series_num']?.toString() ?? '') ??
+      episodeNumber: parsedEpNum ??
+          int.tryParse(json['series_number']?.toString() ?? '') ??
+          int.tryParse(json['series_num']?.toString() ?? '') ??
           int.tryParse(json['episode_num']?.toString() ?? '') ??
           index + 1,
       duration: json['time']?.toString() ??
@@ -114,6 +166,8 @@ class Episode {
           json['description']?.toString() ??
           '',
       rawJson: json,
+      isLocked: false,
+      seriesNumber: seriesNum,
     );
   }
 }

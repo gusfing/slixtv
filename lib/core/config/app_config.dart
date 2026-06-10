@@ -3,7 +3,7 @@ class AppConfig {
   AppConfig._();
 
   // ─── App Info ────────────────────────────────────────────
-  static const String appName = 'SliX TV';
+  static const String appName = 'SFLIXTV';
   static const String appVersion = '1.0.0';
   static const String buildNumber = '1';
 
@@ -38,6 +38,9 @@ class AppConfig {
   static const String stalkerCreateLinkAction = 'create_link';
   static const String stalkerGetEpgAction = 'get_short_epg';
   static const String stalkerGetAllChannelsAction = 'get_all_channels';
+
+  // ─── Remote Config ───────────────────────────────────────
+  static const String remoteConfigUrl = 'https://slixtv-dashboard.vercel.app'; // Replace with your Vercel deployment URL
 
   // ─── Stalker API Types ──────────────────────────────────
   static const String typeItv = 'itv';

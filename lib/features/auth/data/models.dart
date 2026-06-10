@@ -13,6 +13,7 @@ class StalkerProfile {
   final String lsUdp;
   final String endDate;
   final bool status;
+  final String parentPassword;
   final Map<String, dynamic> raw;
 
   const StalkerProfile({
@@ -24,6 +25,7 @@ class StalkerProfile {
     this.lsUdp = '',
     this.endDate = '',
     this.status = true,
+    this.parentPassword = '0000',
     this.raw = const {},
   });
 
@@ -50,6 +52,7 @@ class StalkerProfile {
           json['expire_billing_date']?.toString() ??
           '',
       status: isActive,
+      parentPassword: json['parent_password']?.toString() ?? '0000',
       raw: json,
     );
   }
@@ -128,6 +131,7 @@ class Channel {
   final bool useLoadBalancing;
   final String tvGenreId;
   final bool isFavorite;
+  final bool hasArchive;
   final EpgProgram? currentProgram;
   final EpgProgram? nextProgram;
 
@@ -142,6 +146,7 @@ class Channel {
     this.useLoadBalancing = false,
     this.tvGenreId = '',
     this.isFavorite = false,
+    this.hasArchive = false,
     this.currentProgram,
     this.nextProgram,
   });
@@ -156,6 +161,7 @@ class Channel {
         categoryId: categoryId, useHttpTmpLink: useHttpTmpLink,
         useLoadBalancing: useLoadBalancing, tvGenreId: tvGenreId,
         isFavorite: isFavorite ?? this.isFavorite,
+        hasArchive: hasArchive,
         currentProgram: currentProgram ?? this.currentProgram,
         nextProgram: nextProgram ?? this.nextProgram,
       );
@@ -174,6 +180,16 @@ class Channel {
           json['use_http_tmp_link'] == 1 || json['use_http_tmp_link'] == true,
       useLoadBalancing: json['use_load_balancing'] == 1,
       tvGenreId: json['tv_genre_id']?.toString() ?? '',
+      hasArchive: json['tv_archive'] == 1 || 
+                  json['tv_archive'] == '1' ||
+                  json['tv_archive'] == true ||
+                  json['tv_archive']?.toString().toLowerCase() == 'true' ||
+                  json['archive'] == 1 ||
+                  json['archive'] == '1' ||
+                  json['archive'] == true ||
+                  (json['tv_archive_duration'] != null && 
+                   json['tv_archive_duration'] != 0 && 
+                   json['tv_archive_duration'] != '0'),
     );
   }
 }
@@ -527,3 +543,30 @@ class Episode {
     );
   }
 }
+
+class SubtitleInfo {
+  final String label;
+  final String url;
+
+  const SubtitleInfo({
+    required this.label,
+    required this.url,
+  });
+
+  factory SubtitleInfo.fromJson(Map<String, dynamic> json, {String? baseUrl}) {
+    String url = json['url']?.toString() ?? json['path']?.toString() ?? '';
+    if (url.isNotEmpty && !url.startsWith('http://') && !url.startsWith('https://') && baseUrl != null) {
+      final base = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+      final path = url.startsWith('/') ? url : '/$url';
+      url = '$base$path';
+    }
+    return SubtitleInfo(
+      label: json['title']?.toString() ??
+          json['name']?.toString() ??
+          json['lang']?.toString() ??
+          'Subtitle',
+      url: url,
+    );
+  }
+}
+

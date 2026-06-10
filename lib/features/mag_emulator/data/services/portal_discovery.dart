@@ -41,23 +41,21 @@ class PortalDiscoveryService {
       sessionManager: sessionManager,
     );
 
-    // 15-second total timeout, so we use a shorter timeout per request
-    final dioWithTimeout = Dio(dio.options.copyWith(
-      connectTimeout: const Duration(seconds: 3),
-      receiveTimeout: const Duration(seconds: 3),
-      headers: headers,
-      validateStatus: (status) => status != null && status < 500, // Handle 404s manually
-    ));
-
     for (final path in candidatePaths) {
       try {
         final url = '$baseUrl$path';
-        final response = await dioWithTimeout.get(
+        final response = await dio.get(
           url,
           queryParameters: {
             'type': 'stb',
             'action': 'handshake',
           },
+          options: Options(
+            connectTimeout: const Duration(seconds: 3),
+            receiveTimeout: const Duration(seconds: 3),
+            headers: headers,
+            validateStatus: (status) => status != null && status < 500,
+          ),
         );
 
         if (response.statusCode == 200 && response.data != null) {

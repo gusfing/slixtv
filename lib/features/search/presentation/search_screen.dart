@@ -25,7 +25,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Timer? _debounce;
 
   @override
-  void dispose() { _ctrl.dispose(); _debounce?.cancel(); super.dispose(); }
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.removeListener(_onTextChanged);
+    _ctrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
 
   void _onChanged(String q) {
     _debounce?.cancel();
@@ -45,6 +60,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         backgroundColor: AppColors.background,
         title: TextField(
           controller: _ctrl, onChanged: _onChanged, autofocus: true,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => FocusScope.of(context).unfocus(),
           style: const TextStyle(color: AppColors.textPrimary),
           decoration: const InputDecoration(hintText: AppStrings.searchHint, border: InputBorder.none, hintStyle: TextStyle(color: AppColors.textTertiary)),
         ),

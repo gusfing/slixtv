@@ -3,6 +3,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_colors.dart';
 import '../constants/app_dimensions.dart';
+import '../network/api_client.dart';
 
 /// Shimmer loading placeholder for posters.
 class ShimmerPoster extends StatelessWidget {
@@ -296,6 +297,7 @@ class PosterCard extends StatelessWidget {
   final String? imageUrl;
   final String? subtitle;
   final double? progress;
+  final String? rating;
   final bool isFavorite;
   final VoidCallback? onTap;
   final VoidCallback? onFavoriteTap;
@@ -308,6 +310,7 @@ class PosterCard extends StatelessWidget {
     this.imageUrl,
     this.subtitle,
     this.progress,
+    this.rating,
     this.isFavorite = false,
     this.onTap,
     this.onFavoriteTap,
@@ -315,12 +318,67 @@ class PosterCard extends StatelessWidget {
     this.height = AppDimensions.posterHeight,
   });
 
-  static Widget _posterPlaceholder() => Container(
-        color: AppColors.surface,
-        child: const Center(
-          child: Icon(Icons.movie_outlined, color: AppColors.textTertiary, size: 36),
+  static Widget _posterPlaceholder(String title) {
+    final int hash = title.hashCode;
+    final double hue = (hash.abs() % 360).toDouble();
+    final color = HSLColor.fromAHSL(1.0, hue, 0.45, 0.22).toColor();
+    final accentColor = HSLColor.fromAHSL(1.0, hue, 0.8, 0.55).toColor();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: color,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color,
+            color.withValues(alpha: 0.85),
+            Colors.black.withValues(alpha: 0.95),
+          ],
         ),
-      );
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            right: -8,
+            bottom: -8,
+            child: Icon(
+              Icons.movie_outlined,
+              color: accentColor.withValues(alpha: 0.08),
+              size: 64,
+            ),
+          ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.movie_filter_rounded,
+                color: accentColor.withValues(alpha: 0.65),
+                size: 24,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.2,
+                  height: 1.2,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -345,16 +403,46 @@ class PosterCard extends StatelessWidget {
                             width: width,
                             height: height,
                             fit: BoxFit.cover,
+                            httpHeaders: ApiClient().getStalkerHeaders(),
                             placeholder: (context, url) => Shimmer.fromColors(
                               baseColor: AppColors.surface,
                               highlightColor: AppColors.surfaceLight,
                               child: Container(color: AppColors.surface),
                             ),
-                            errorWidget: (context, url, error) => _posterPlaceholder(),
+                            errorWidget: (context, url, error) => _posterPlaceholder(title),
                           )
-                        : _posterPlaceholder(),
+                        : _posterPlaceholder(title),
                   ),
                 ),
+                // Rating badge
+                if (rating != null && rating!.isNotEmpty && rating != '0' && rating != '0.0' && rating != 'null')
+                  Positioned(
+                    top: 6,
+                    left: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.amber.withValues(alpha: 0.3), width: 0.5),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
+                          const SizedBox(width: 2),
+                          Text(
+                            rating!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 // Favorite badge
                 if (onFavoriteTap != null)
                   Positioned(
@@ -431,6 +519,7 @@ class ChannelTile extends StatelessWidget {
   final bool isFavorite;
   final VoidCallback? onTap;
   final VoidCallback? onFavoriteTap;
+  final VoidCallback? onEpgTap;
 
   const ChannelTile({
     super.key,
@@ -441,6 +530,7 @@ class ChannelTile extends StatelessWidget {
     this.isFavorite = false,
     this.onTap,
     this.onFavoriteTap,
+    this.onEpgTap,
   });
 
   @override
@@ -450,22 +540,39 @@ class ChannelTile extends StatelessWidget {
         horizontal: AppDimensions.md,
         vertical: AppDimensions.xs,
       ),
-      leading: Container(
-        width: 56,
-        height: 40,
-        decoration: BoxDecoration(
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+        child: Container(
+          width: 56,
+          height: 40,
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-          image: logo != null && logo!.isNotEmpty
-              ? DecorationImage(
-                  image: CachedNetworkImageProvider(logo!),
+          child: logo != null && logo!.isNotEmpty
+              ? CachedNetworkImage(
+                  imageUrl: logo!,
+                  httpHeaders: ApiClient().getStalkerHeaders(),
                   fit: BoxFit.contain,
+                  placeholder: (context, url) => Center(
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        valueColor: AlwaysStoppedAnimation(AppColors.primary),
+                      ),
+                    ),
+                  ),
+                  errorWidget: (context, url, error) => const Icon(
+                    Icons.tv,
+                    color: AppColors.textTertiary,
+                    size: 20,
+                  ),
                 )
-              : null,
+              : const Icon(
+                  Icons.tv,
+                  color: AppColors.textTertiary,
+                  size: 20,
+                ),
         ),
-        child: logo == null || logo!.isEmpty
-            ? Icon(Icons.tv, color: AppColors.textTertiary, size: 20)
-            : null,
       ),
       title: Text(
         name,
@@ -495,6 +602,16 @@ class ChannelTile extends StatelessWidget {
               ),
               onPressed: onFavoriteTap,
             ),
+          if (onEpgTap != null)
+            IconButton(
+              icon: const Icon(
+                Icons.history_rounded,
+                color: AppColors.textTertiary,
+                size: 20,
+              ),
+              tooltip: 'Catch-Up EPG Guide',
+              onPressed: onEpgTap,
+            ),
           const Icon(Icons.chevron_right, color: AppColors.textTertiary, size: 20),
         ],
       ),
@@ -502,3 +619,56 @@ class ChannelTile extends StatelessWidget {
     );
   }
 }
+
+/// Premium capsule selector for categories.
+class CategoryCapsule extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const CategoryCapsule({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.border,
+            width: 1,
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.white : AppColors.textSecondary,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

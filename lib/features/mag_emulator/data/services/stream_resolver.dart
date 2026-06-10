@@ -3,6 +3,7 @@ import 'package:slix_iptv/features/mag_emulator/data/services/session_manager.da
 import 'package:slix_iptv/features/mag_emulator/data/services/mag_headers.dart';
 import 'package:slix_iptv/features/mag_emulator/data/models/device_identity.dart';
 import 'package:slix_iptv/features/mag_emulator/data/utils/response_parser.dart';
+import 'package:slix_iptv/core/utils/stalker_parser.dart';
 
 class StreamResolutionException implements Exception {
   final String message;
@@ -74,7 +75,39 @@ class StreamResolver {
         .replaceAll('127.0.0.1', uri.host);
   }
 
-  Future<String> resolveStreamUrl(String type, String cmd, {String? series}) async {
+  String _extractNumericId(String s) {
+    final match = RegExp(r'\d+').firstMatch(s);
+    return match != null ? match.group(0)! : '';
+  }
+
+  Future<Map<String, dynamic>> _stalkerRequest({
+    required String type,
+    required String action,
+    Map<String, String>? extraParams,
+  }) async {
+    if (sessionManager.portalBaseUrl == null || sessionManager.portalEndpoint == null) {
+      throw StreamResolutionException('Portal endpoint not set');
+    }
+    final url = '${sessionManager.portalBaseUrl}${sessionManager.portalEndpoint}';
+    final params = <String, String>{
+      'type': type,
+      'action': action,
+      'JsHttpRequest': '1-xml',
+      ...?extraParams,
+    };
+    final headers = MagHeaders.buildHeaders(
+      deviceIdentity: deviceIdentity,
+      sessionManager: sessionManager,
+    );
+    final response = await dio.get(
+      url,
+      queryParameters: params,
+      options: Options(headers: headers),
+    );
+    return ResponseParser.parseResponse(response);
+  }
+
+  Future<String> resolveStreamUrl(String type, String cmd, {String? series, String? duration}) async {
     // 1. Pre-process the command
     String processedCmd = _stripPrefixes(cmd);
     processedCmd = _extractHttpUrl(processedCmd);
@@ -94,6 +127,243 @@ class StreamResolver {
       print('Warning: Unsupported protocol scheme: $processedCmd');
     }
 
+    String resolvedCmd = cmd;
+    if ((type == 'series' || type == 'vod') &&
+        !resolvedCmd.startsWith('http') &&
+        !resolvedCmd.startsWith('rtsp') &&
+        !resolvedCmd.startsWith('/media/file_')) {
+      print('StreamResolver: Intercepted catalog cmd: $resolvedCmd. Resolving file ID...');
+      try {
+        final parentId = _extractNumericId(resolvedCmd);
+        if (parentId.isNotEmpty) {
+          if (series != null && series.isNotEmpty) {
+            // It's a Series Episode
+            print('StreamResolver: Querying get_ordered_list for parent series: movie_id=$parentId');
+            final seasonsRes = await _stalkerRequest(
+              type: 'vod',
+              action: 'get_ordered_list',
+              extraParams: {
+                'movie_id': parentId,
+              },
+            );
+            final seasonsJs = seasonsRes['js'];
+            if (seasonsJs != null && seasonsJs != false) {
+              final rawList = StalkerParser.extractList(
+                seasonsJs is Map ? seasonsJs['data'] ?? seasonsJs : seasonsJs
+              );
+
+              final hasSeasons = rawList.any((e) =>
+                  e is Map<String, dynamic> &&
+                  (e['is_season'] == true ||
+                      e['is_season'] == 'true' ||
+                      e['is_season'] == 1 ||
+                      e['is_season'] == '1'));
+
+              // Check if this is a file list (portal returned files directly)
+              final hasFiles = rawList.any((e) =>
+                  e is Map<String, dynamic> &&
+                  (e['is_file'] == true ||
+                      e['is_file'] == 'true' ||
+                      e['is_file'] == 1 ||
+                      e['is_file'] == '1'));
+
+              if (hasFiles && !hasSeasons) {
+                // Portal returned file items directly. Use the first file's ID.
+                // The 'series' param is an episode number but these items are files,
+                // not episodes — there's no series_number to match against.
+                // Pick the file whose index matches the episode number, or the first.
+                final epIndex = (int.tryParse(series) ?? 1) - 1;
+                final targetFile = epIndex >= 0 && epIndex < rawList.length
+                    ? rawList[epIndex]
+                    : rawList.first;
+                if (targetFile is Map<String, dynamic>) {
+                  final fileId = targetFile['id']?.toString();
+                  if (fileId != null && fileId.isNotEmpty) {
+                    resolvedCmd = '/media/file_$fileId.mpg';
+                    print('StreamResolver: Resolved flat-file series cmd to: $resolvedCmd');
+                  }
+                }
+              } else if (hasSeasons) {
+                String? foundEpisodeId;
+                String? foundSeasonId;
+
+                // For each season, get episodes and search for the episode number
+                for (final season in rawList) {
+                  if (season is Map<String, dynamic>) {
+                    final seasonId = season['id']?.toString() ?? '';
+                    if (seasonId.isNotEmpty) {
+                      print('StreamResolver: Querying episodes for season $seasonId');
+                      final epRes = await _stalkerRequest(
+                        type: 'vod',
+                        action: 'get_ordered_list',
+                        extraParams: {
+                          'movie_id': parentId,
+                          'season_id': seasonId,
+                        },
+                      );
+                      final epJs = epRes['js'];
+                      if (epJs != null && epJs != false) {
+                        final epList = StalkerParser.extractList(
+                          epJs is Map ? epJs['data'] ?? epJs : epJs
+                        );
+                        for (final ep in epList) {
+                          if (ep is Map<String, dynamic>) {
+                            // Check if these are file items
+                            final epIsFile = ep['is_file'] == true || ep['is_file'] == 1 || ep['is_file'] == '1' || ep['is_file'] == 'true';
+                            if (epIsFile) {
+                              // File items: use index-based matching or first file
+                              final epIndex = (int.tryParse(series) ?? 1) - 1;
+                              final targetFile = epIndex >= 0 && epIndex < epList.length
+                                  ? epList[epIndex]
+                                  : epList.first;
+                              if (targetFile is Map<String, dynamic>) {
+                                foundEpisodeId = targetFile['id']?.toString();
+                                foundSeasonId = seasonId;
+                              }
+                              break;
+                            }
+                            final epNum = ep['series_number']?.toString() ??
+                                ep['series_num']?.toString() ??
+                                ep['episode_num']?.toString() ??
+                                '';
+                            if (epNum == series) {
+                              foundEpisodeId = ep['id']?.toString();
+                              foundSeasonId = seasonId;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                  if (foundEpisodeId != null) break;
+                }
+
+                if (foundEpisodeId != null) {
+                  // Resolve the episode container to its actual playable file ID
+                  print('StreamResolver: Episode container ID found: $foundEpisodeId. Querying for file...');
+                  try {
+                    final fileRes = await _stalkerRequest(
+                      type: 'vod',
+                      action: 'get_ordered_list',
+                      extraParams: {
+                        'movie_id': parentId,
+                        if (foundSeasonId != null && foundSeasonId.isNotEmpty) 'season_id': foundSeasonId,
+                        'episode_id': foundEpisodeId,
+                      },
+                    );
+                    final fileJs = fileRes['js'];
+                    if (fileJs != null && fileJs != false) {
+                      final fileList = StalkerParser.extractList(
+                        fileJs is Map ? fileJs['data'] ?? fileJs : fileJs
+                      );
+                      if (fileList.isNotEmpty) {
+                        final firstFile = fileList.first;
+                        if (firstFile is Map<String, dynamic>) {
+                          final fileId = firstFile['id']?.toString();
+                          if (fileId != null && fileId.isNotEmpty) {
+                            foundEpisodeId = fileId;
+                            print('StreamResolver: Resolved to actual file ID: $fileId');
+                          }
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    print('StreamResolver: Failed to fetch actual file for episode container: $e');
+                  }
+
+                  resolvedCmd = '/media/file_$foundEpisodeId.mpg';
+                  print('StreamResolver: Resolved season-based series cmd to: $resolvedCmd');
+                } else {
+                  print('StreamResolver: Warning: Episode number $series not found for parent series $parentId');
+                }
+              } else {
+                // Flat series with no is_file flag — search by series_number
+                String? foundEpisodeId;
+                for (final ep in rawList) {
+                  if (ep is Map<String, dynamic>) {
+                    final epNum = ep['series_number']?.toString() ??
+                        ep['series_num']?.toString() ??
+                        ep['episode_num']?.toString() ??
+                        '';
+                    if (epNum == series) {
+                      foundEpisodeId = ep['id']?.toString();
+                      break;
+                    }
+                  }
+                }
+                if (foundEpisodeId != null) {
+                  print('StreamResolver: Flat episode container ID found: $foundEpisodeId. Querying for file...');
+                  try {
+                    final fileRes = await _stalkerRequest(
+                      type: 'vod',
+                      action: 'get_ordered_list',
+                      extraParams: {
+                        'movie_id': parentId,
+                        'episode_id': foundEpisodeId,
+                      },
+                    );
+                    final fileJs = fileRes['js'];
+                    if (fileJs != null && fileJs != false) {
+                      final fileList = StalkerParser.extractList(
+                        fileJs is Map ? fileJs['data'] ?? fileJs : fileJs
+                      );
+                      if (fileList.isNotEmpty) {
+                        final firstFile = fileList.first;
+                        if (firstFile is Map<String, dynamic>) {
+                          final fileId = firstFile['id']?.toString();
+                          if (fileId != null && fileId.isNotEmpty) {
+                            foundEpisodeId = fileId;
+                            print('StreamResolver: Resolved flat series to actual file ID: $fileId');
+                          }
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    print('StreamResolver: Failed to fetch actual file for flat episode container: $e');
+                  }
+
+                  resolvedCmd = '/media/file_$foundEpisodeId.mpg';
+                  print('StreamResolver: Resolved flat series cmd to: $resolvedCmd');
+                } else {
+                  print('StreamResolver: Warning: Episode number $series not found for parent series $parentId');
+                }
+              }
+            }
+          } else {
+            // It's a Movie
+            print('StreamResolver: Querying get_ordered_list for movie file: movie_id=$parentId');
+            final listRes = await _stalkerRequest(
+              type: 'vod',
+              action: 'get_ordered_list',
+              extraParams: {
+                'movie_id': parentId,
+              },
+            );
+            final listJs = listRes['js'];
+            if (listJs != null && listJs != false) {
+              final rawList = StalkerParser.extractList(
+                listJs is Map ? listJs['data'] ?? listJs : listJs
+              );
+              if (rawList.isNotEmpty) {
+                final firstItem = rawList.first;
+                if (firstItem is Map<String, dynamic>) {
+                  final fileId = firstItem['id']?.toString();
+                  if (fileId != null && fileId.isNotEmpty) {
+                    resolvedCmd = '/media/file_$fileId.mpg';
+                    print('StreamResolver: Resolved movie cmd to: $resolvedCmd');
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        print('StreamResolver: Failed to resolve file command: $e');
+      }
+    }
+
+
     // 3. Send create_link request
     if (sessionManager.portalBaseUrl == null || sessionManager.portalEndpoint == null) {
       throw StreamResolutionException('Portal endpoint not set');
@@ -103,14 +373,13 @@ class StreamResolver {
     final queryParams = {
       'type': type,
       'action': 'create_link',
-      'cmd': cmd, // Original cmd is usually sent
+      'cmd': resolvedCmd,
       'forced_storage': 'undefined',
       'disable_ad': '0',
       'JsHttpRequest': '1-xml',
+      if (series != null) 'series': series,
+      if (duration != null) 'duration': duration,
     };
-    if (series != null) {
-      queryParams['series'] = series;
-    }
 
     final headers = MagHeaders.buildHeaders(
       deviceIdentity: deviceIdentity,

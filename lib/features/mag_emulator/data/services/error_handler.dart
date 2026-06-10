@@ -105,6 +105,16 @@ class MagErrorHandler extends Interceptor {
   }
 
   String _getFriendlyErrorMessage(DioException err) {
+    if (err.response?.statusCode != null) {
+      final statusCode = err.response!.statusCode;
+      if (statusCode == 429) {
+        return 'Rate limited. Please wait and try again.';
+      }
+      if (statusCode == 500 || statusCode == 502 || statusCode == 503) {
+         return 'Portal server error ($statusCode)';
+      }
+    }
+
     if (err.type == DioExceptionType.connectionTimeout || 
         err.type == DioExceptionType.sendTimeout || 
         err.type == DioExceptionType.receiveTimeout) {
@@ -113,14 +123,6 @@ class MagErrorHandler extends Interceptor {
 
     if (err.type == DioExceptionType.connectionError || err.type == DioExceptionType.unknown) {
       return 'Cannot reach portal server';
-    }
-
-    if (err.response?.statusCode == 429) {
-      return 'Rate limited. Please wait and try again.';
-    }
-
-    if (err.response?.statusCode == 500 || err.response?.statusCode == 502 || err.response?.statusCode == 503) {
-       return 'Portal server error (${err.response?.statusCode})';
     }
 
     return err.message ?? 'Unknown network error';
