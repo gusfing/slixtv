@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
+
+
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_strings.dart';
 import 'core/storage/storage_service.dart';
@@ -21,11 +22,13 @@ import 'features/player/presentation/player_screen.dart';
 import 'core/widgets/parental_pin_dialog.dart';
 import 'features/home/presentation/home_screen.dart';
 
+import 'package:media_kit/media_kit.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
 
-  // Force Landscape Orientation (Horizontal Layout)
+  // Enforce landscape orientation for the app
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
@@ -199,11 +202,8 @@ class _AppNavigatorState extends ConsumerState<_AppNavigator> {
         activeScreen = const LoginScreen();
         break;
       case _Screen.main:
-        activeScreen = HomeScreen(
+        activeScreen = AppShell(
           onLogout: () => setState(() => _currentScreen = _Screen.login),
-          onChannelTap: _onChannelTap,
-          onMovieTap: _onMovieTap,
-          onSeriesTap: _onSeriesTap,
         );
         break;
     }

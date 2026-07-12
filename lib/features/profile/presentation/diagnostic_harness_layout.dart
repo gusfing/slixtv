@@ -5,8 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' as webview;
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:better_player/better_player.dart';
+
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/network/api_client.dart';
@@ -2572,8 +2572,8 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
   // ─── 12. Playback Tester Screen ────────────────────────────────────────────
 
   final _playbackUrlController = TextEditingController();
-  Player? _diagPlayer;
-  VideoController? _diagVideoController;
+  
+  BetterPlayerController? _diagVideoController;
   final List<String> _playbackEvents = [];
 
   Widget _buildPlaybackTesterScreen() {
@@ -2601,10 +2601,10 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
             const SizedBox(width: 8),
             TextButton(
               onPressed: () {
-                if (_diagPlayer != null) {
-                  _diagPlayer!.dispose();
+                if (_diagVideoController != null) {
+                  _diagVideoController!.dispose();
                   setState(() {
-                    _diagPlayer = null;
+                    
                     _diagVideoController = null;
                   });
                 }
@@ -2636,10 +2636,7 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
                           ],
                         ),
                       )
-                    : Video(
-                        controller: _diagVideoController!,
-                        controls: NoVideoControls,
-                      ),
+                    : BetterPlayer(controller: _diagVideoController!),
               ),
             ),
             const SizedBox(width: 12),
@@ -2697,9 +2694,8 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
     
     _toast('Initializing media_kit Player...');
     
-    if (_diagPlayer != null) {
-      _diagPlayer!.dispose();
-      _diagPlayer = null;
+    if (_diagVideoController != null) {
+      _diagVideoController?.dispose();
       _diagVideoController = null;
     }
     
@@ -2722,32 +2718,46 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
     });
     
     try {
-      final player = Player();
-      _diagPlayer = player;
-      _diagVideoController = VideoController(player);
       
-      player.stream.error.listen((error) {
+      
+      
+      _diagVideoController = BetterPlayerController(
+        BetterPlayerConfiguration(
+          autoPlay: true,
+          looping: true,
+          controlsConfiguration: BetterPlayerControlsConfiguration(showControls: false),
+        ),
+        betterPlayerDataSource: BetterPlayerDataSource(
+          BetterPlayerDataSourceType.network,
+          streamUrl,
+          headers: headers,
+        ),
+      );
+
+      
+      _diagVideoController?.addEventsListener((event) {
         if (!mounted) return;
         final timestamp = DateTime.now().toIso8601String().substring(11, 19);
-        if (error.isNotEmpty) {
+        if (event.betterPlayerEventType == BetterPlayerEventType.exception) {
+          final error = event.parameters?["error"]?.toString() ?? "Unknown error";
           setState(() {
             _playbackEvents.add('[$timestamp] ERROR: $error');
           });
           _appLogger.player('Playback error', error: error);
+        } else if (event.betterPlayerEventType == BetterPlayerEventType.play) {
+          setState(() {
+            _playbackEvents.add('[$timestamp] PLAYING');
+          });
+        } else if (event.betterPlayerEventType == BetterPlayerEventType.pause) {
+          setState(() {
+            _playbackEvents.add('[$timestamp] PAUSED');
+          });
         }
-      });
-
-      player.stream.playing.listen((playing) {
-        if (!mounted) return;
-        final timestamp = DateTime.now().toIso8601String().substring(11, 19);
-        setState(() {
-          _playbackEvents.add('[$timestamp] ${playing ? "PLAYING" : "PAUSED"}');
-        });
       });
 
       setState(() {}); // refresh to show video widget
       
-      await player.open(Media(streamUrl, httpHeaders: headers));
+      // handled by init
       
       final timestamp = DateTime.now().toIso8601String().substring(11, 19);
       setState(() {
@@ -2758,7 +2768,7 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
       final timestamp = DateTime.now().toIso8601String().substring(11, 19);
       setState(() {
         _playbackEvents.add('[$timestamp] SETUP ERROR: $e');
-        _diagPlayer = null;
+        
         _diagVideoController = null;
       });
       _toast('Player setup failed: $e', isError: true);
@@ -2898,7 +2908,7 @@ class _DiagnosticHarnessLayoutState extends ConsumerState<DiagnosticHarnessLayou
 
   @override
   void dispose() {
-    _diagPlayer?.dispose();
+    
     _portalUrlController.dispose();
     _macController.dispose();
     _timezoneController.dispose();

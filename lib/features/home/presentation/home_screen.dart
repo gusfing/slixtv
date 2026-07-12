@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
@@ -1001,354 +1002,894 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
+    final userDisplay = _getUserDisplay(authState);
+    final expirationText = _getExpirationText(authState);
 
-    // Watching counts for indicators
-    final channels = ref.watch(allChannelsProvider);
-    final movies = ref.watch(moviesProvider(null));
-    final series = ref.watch(seriesProvider(null));
+    // Watch featured content for banner
+    final featuredMovies = ref.watch(moviesProvider(null));
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isCompact = screenWidth < 700;
+    final liveCard = DashboardCard(
+      title: 'Live TV',
+      subtitle: 'Watch Live',
+      imageAsset: 'assets/images/live-stream.png',
+      height: 200,
+      onTap: () {
+        if (widget.onNavigateToTab != null) widget.onNavigateToTab!(1);
+      },
+    );
+
+    final moviesCard = DashboardCard(
+      title: 'Movies',
+      subtitle: 'VOD Content',
+      imageAsset: 'assets/images/clapperboard.png',
+      height: 200,
+      onTap: () {
+        if (widget.onNavigateToTab != null) widget.onNavigateToTab!(2);
+      },
+    );
+
+    final seriesCard = DashboardCard(
+      title: 'Series',
+      subtitle: 'Binge Watch',
+      imageAsset: 'assets/images/film-reel.png',
+      height: 200,
+      onTap: () {
+        if (widget.onNavigateToTab != null) widget.onNavigateToTab!(3);
+      },
+    );
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Container(
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.background,
-              AppColors.backgroundLight,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // ─── SFLIXTV Header / Top Bar ────────
-              FadeInDown(
-                duration: const Duration(milliseconds: 400),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.15),
-                    border: const Border(
-                      bottom: BorderSide(color: AppColors.divider, width: 0.5),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      // App logo & title
-                      Image.asset(
-                        'assets/images/icon.png',
-                        width: 32,
-                        height: 32,
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        AppStrings.appName,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          authState.authType.toUpperCase(),
-                          style: const TextStyle(
-                            color: AppColors.primary,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-
-                      // Middle: Server details & time info (Only if not too compact)
-                      if (!isCompact) ...[
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              DateFormat('MMM dd, yyyy').format(_now),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                            Text(
-                              DateFormat('hh:mm a').format(_now),
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 20),
-                        Container(width: 1, height: 28, color: AppColors.divider),
-                        const SizedBox(width: 20),
-                      ],
-
-                      // Right: Expiry, Server & Settings Icon
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.vpn_key_rounded, size: 12, color: Colors.white54),
-                              const SizedBox(width: 4),
-                              Text(
-                                _getUserDisplay(authState),
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Expiry: ${_getExpirationText(authState)}',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
-                            ),
+      backgroundColor: Colors.transparent, // Background provided by AppShell
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Sleek Top Bar
+          Padding(
+            padding: const EdgeInsets.only(left: 32, right: 32, top: 24, bottom: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withOpacity(0.4),
+                            blurRadius: 12,
+                            spreadRadius: 2,
                           ),
                         ],
                       ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        style: IconButton.styleFrom(
-                          backgroundColor: AppColors.surface,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Welcome, $userDisplay',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                        icon: const Icon(Icons.settings_rounded, color: Colors.white, size: 18),
-                        onPressed: () {
-                          Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => ProfileScreen(onLogout: widget.onLogout),
-                          ));
-                        },
+                        Text(
+                          'Valid until: $expirationText',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                Text(
+                  DateFormat("hh:mm a").format(_now),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+            child: GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SearchScreen(
+                      onChannelTap: widget.onChannelTap,
+                      onMovieTap: widget.onMovieTap,
+                      onSeriesTap: widget.onSeriesTap,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.search_rounded, color: AppColors.textSecondary, size: 22),
+                    const SizedBox(width: 16),
+                    const Text(
+                      'Search for movies, series or channels...',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
                       ),
-                    ],
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.mic_none_rounded, color: AppColors.primary, size: 20),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 600;
+                return SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 32, vertical: 8),
+                  child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Dynamic Hero Banner
+                  featuredMovies.when(
+                    data: (movies) {
+                      if (movies.isEmpty) return _buildDefaultBanner();
+                      return DynamicHeroBanner(
+                        items: movies.take(5).toList(),
+                        onWatchNow: (item) => widget.onMovieTap?.call(item),
+                      );
+                    },
+                    loading: () => Shimmer.fromColors(
+                      baseColor: AppColors.surface,
+                      highlightColor: AppColors.surfaceLight,
+                      child: Container(
+                        width: double.infinity,
+                        height: 220,
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                    ),
+                    error: (_, __) => _buildDefaultBanner(),
+                  ),
+                  const SizedBox(height: 32),
+                  
+                  // Continue Watching
+                  _buildContinueWatchingRow(context),
+                  
+                  const SizedBox(height: 32),
+
+                  // Trending Movies Row
+                  featuredMovies.when(
+                    data: (movies) => _ContentRow(
+                      title: 'TRENDING MOVIES',
+                      itemsAsync: AsyncValue.data(movies.take(15).toList()),
+                      onTap: (item) => widget.onMovieTap?.call(item as VodItem),
+                    ),
+                    loading: () => const ShimmerRow(),
+                    error: (_, __) => const SizedBox(),
+                  ),
+                  
+                  const SizedBox(height: 32),
+                  
+                  // Video Club Section (Categories List System)
+                  _buildVideoClubSection(),
+                  
+                  const SizedBox(height: 32),
+                  
+                  // Series Section
+                  _buildSeriesSection(),
+                  
+                  const SizedBox(height: 40),
+                ],
+              ),
+            );
+            },
+          ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLiveTvSection() {
+    final channelsAsync = ref.watch(allChannelsProvider);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 16),
+          child: Row(
+            children: [
+              Icon(Icons.tv_rounded, color: AppColors.primary, size: 24),
+              SizedBox(width: 12),
+              Text(
+                'Live TV',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 100,
+          child: channelsAsync.when(
+            data: (channels) {
+              final displayChannels = channels.take(10).toList();
+              return ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: displayChannels.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                itemBuilder: (context, index) {
+                  final channel = displayChannels[index];
+                  return _LiveChannelCard(
+                    channel: channel,
+                    onTap: () => widget.onChannelTap?.call(channel),
+                  );
+                },
+              );
+            },
+            loading: () => ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 5,
+              separatorBuilder: (_, __) => const SizedBox(width: 14),
+              itemBuilder: (_, __) => Shimmer.fromColors(
+                baseColor: AppColors.surface,
+                highlightColor: AppColors.surfaceLight,
+                child: Container(
+                  width: 140,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
+            ),
+            error: (_, __) => const SizedBox(),
+          ),
+        ),
+      ],
+    );
+  }
 
-              // ─── Main Grid Contents (Landscape Responsive Row of 4 Flex Cards) ──
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Column(
-                    children: [
-                      _buildContinueWatchingRow(context),
-                      FadeInUp(
-                        duration: const Duration(milliseconds: 500),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final double cardHeight = isCompact ? 130 : 170;
+  Widget _buildVideoClubSection() {
+    final categoriesAsync = ref.watch(vodCategoriesProvider);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 16),
+          child: Row(
+            children: [
+              Icon(Icons.movie_filter_rounded, color: AppColors.primary, size: 24),
+              SizedBox(width: 12),
+              Text(
+                'Video Club',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        categoriesAsync.when(
+          data: (categories) {
+            // Show top 3 categories
+            final displayCats = categories.where((c) => !isAdultContent(categoryName: c.title)).take(3).toList();
+            return Column(
+              children: displayCats.map((cat) => _ContentRow(
+                title: cat.title,
+                itemsAsync: ref.watch(moviesProvider(cat.id)),
+                onTap: (item) => widget.onMovieTap?.call(item as VodItem),
+              )).toList(),
+            );
+          },
+          loading: () => const ShimmerRow(),
+          error: (_, __) => const SizedBox(),
+        ),
+      ],
+    );
+  }
 
-                            final liveCard = DashboardCard(
-                              title: 'LIVE TV',
-                              subtitle: channels.when(
-                                data: (list) => '${list.length} Channels',
-                                loading: () => 'Loading...',
-                                error: (_, __) => 'Manage Live TV',
-                              ),
-                              imageAsset: 'assets/images/live-stream.png',
-                              onTap: () {
-                                Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => LiveTvScreen(onChannelTap: widget.onChannelTap),
-                                )).then((_) {
-                                  if (mounted) {
-                                    ref.read(continueWatchingProvider.notifier).refresh();
-                                  }
-                                });
-                              },
-                              height: cardHeight,
-                              autoFocus: true,
-                            );
+  Widget _buildSeriesSection() {
+    final categoriesAsync = ref.watch(seriesCategoriesProvider);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 16),
+          child: Row(
+            children: [
+              Icon(Icons.video_library_rounded, color: AppColors.primary, size: 24),
+              SizedBox(width: 12),
+              Text(
+                'Series',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        categoriesAsync.when(
+          data: (categories) {
+            // Show top 3 categories
+            final displayCats = categories.where((c) => !isAdultContent(categoryName: c.title)).take(3).toList();
+            return Column(
+              children: displayCats.map((cat) => _ContentRow(
+                title: cat.title,
+                itemsAsync: ref.watch(seriesProvider(cat.id)),
+                onTap: (item) => widget.onSeriesTap?.call(item as SeriesItem),
+              )).toList(),
+            );
+          },
+          loading: () => const ShimmerRow(),
+          error: (_, __) => const SizedBox(),
+        ),
+      ],
+    );
+  }
 
-                            final moviesCard = DashboardCard(
-                              title: 'Movies',
-                              subtitle: movies.when(
-                                data: (list) => '${list.length} Movies',
-                                loading: () => 'Loading...',
-                                error: (_, __) => 'Watch Movies',
-                              ),
-                              imageAsset: 'assets/images/film-reel.png',
-                              onTap: () {
-                                Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => MoviesScreen(onMovieTap: widget.onMovieTap),
-                                )).then((_) {
-                                  if (mounted) {
-                                    ref.read(continueWatchingProvider.notifier).refresh();
-                                  }
-                                });
-                              },
-                              height: cardHeight,
-                            );
+  Widget _buildDefaultBanner() {
+    return Container(
+      width: double.infinity,
+      height: 220,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: [
+            AppColors.primary.withOpacity(0.8),
+            AppColors.primaryDark.withOpacity(0.8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Experience Unlimited Entertainment',
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Stream thousands of movies, series, and live TV channels.',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-                            final seriesCard = DashboardCard(
-                              title: 'Series',
-                              subtitle: series.when(
-                                data: (list) => '${list.length} Series',
-                                loading: () => 'Loading...',
-                                error: (_, __) => 'Watch Series',
-                              ),
-                              imageAsset: 'assets/images/clapperboard.png',
-                              onTap: () {
-                                Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => SeriesScreen(onSeriesTap: widget.onSeriesTap),
-                                )).then((_) {
-                                  if (mounted) {
-                                    ref.read(continueWatchingProvider.notifier).refresh();
-                                  }
-                                });
-                              },
-                              height: cardHeight,
-                            );
+class DynamicHeroBanner extends StatefulWidget {
+  final List<VodItem> items;
+  final Function(VodItem) onWatchNow;
 
-                            final settingsColumn = Column(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                DashboardSmallCard(
-                                  title: 'EPG Guide',
-                                  icon: Icons.calendar_view_day_rounded,
-                                  onTap: () {
-                                    Navigator.of(context).push(MaterialPageRoute(
-                                      builder: (_) => LiveTvScreen(onChannelTap: widget.onChannelTap),
-                                    ));
-                                  },
-                                ),
-                                DashboardSmallCard(
-                                  title: 'Favourites',
-                                  icon: Icons.favorite_rounded,
-                                  onTap: () => _showFavoritesBottomSheet(context),
-                                ),
-                                DashboardSmallCard(
-                                  title: 'Catch Up',
-                                  icon: Icons.history_rounded,
-                                  onTap: () => _showCatchupChannelsBottomSheet(context),
-                                ),
-                                DashboardSmallCard(
-                                  title: 'Search Content',
-                                  icon: Icons.search_rounded,
-                                  onTap: () {
-                                    Navigator.of(context).push(MaterialPageRoute(
-                                      builder: (_) => SearchScreen(
-                                        onChannelTap: widget.onChannelTap,
-                                        onMovieTap: widget.onMovieTap,
-                                        onSeriesTap: widget.onSeriesTap,
-                                      ),
-                                    ));
-                                  },
-                                ),
-                              ],
-                            );
+  const DynamicHeroBanner({
+    super.key,
+    required this.items,
+    required this.onWatchNow,
+  });
 
-                            final settingsColumnCompact = Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                DashboardSmallCard(
-                                  title: 'EPG Guide',
-                                  icon: Icons.calendar_view_day_rounded,
-                                  onTap: () {
-                                    Navigator.of(context).push(MaterialPageRoute(
-                                      builder: (_) => LiveTvScreen(onChannelTap: widget.onChannelTap),
-                                    ));
-                                  },
-                                ),
-                                const SizedBox(height: 8),
-                                DashboardSmallCard(
-                                  title: 'Favourites',
-                                  icon: Icons.favorite_rounded,
-                                  onTap: () => _showFavoritesBottomSheet(context),
-                                ),
-                                const SizedBox(height: 8),
-                                DashboardSmallCard(
-                                  title: 'Catch Up',
-                                  icon: Icons.history_rounded,
-                                  onTap: () => _showCatchupChannelsBottomSheet(context),
-                                ),
-                                const SizedBox(height: 8),
-                                DashboardSmallCard(
-                                  title: 'Search Content',
-                                  icon: Icons.search_rounded,
-                                  onTap: () {
-                                    Navigator.of(context).push(MaterialPageRoute(
-                                      builder: (_) => SearchScreen(
-                                        onChannelTap: widget.onChannelTap,
-                                        onMovieTap: widget.onMovieTap,
-                                        onSeriesTap: widget.onSeriesTap,
-                                      ),
-                                    ));
-                                  },
-                                ),
-                              ],
-                            );
+  @override
+  State<DynamicHeroBanner> createState() => _DynamicHeroBannerState();
+}
 
-                            if (isCompact) {
-                              return Column(
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(child: liveCard),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Row(
-                                    children: [
-                                      Expanded(child: moviesCard),
-                                      const SizedBox(width: 16),
-                                      Expanded(child: seriesCard),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  settingsColumnCompact,
-                                ],
-                              );
-                            } else {
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(flex: 2, child: liveCard),
-                                  const SizedBox(width: 14),
-                                  Expanded(flex: 2, child: moviesCard),
-                                  const SizedBox(width: 14),
-                                  Expanded(flex: 2, child: seriesCard),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    flex: 2,
-                                    child: SizedBox(
-                                      height: cardHeight,
-                                      child: settingsColumn,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
+class _DynamicHeroBannerState extends State<DynamicHeroBanner> {
+  late PageController _pageController;
+  int _currentPage = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 0);
+    _timer = Timer.periodic(const Duration(seconds: 8), (Timer timer) {
+      if (_currentPage < widget.items.length - 1) {
+        _currentPage++;
+      } else {
+        _currentPage = 0;
+      }
+      if (_pageController.hasClients) {
+        _pageController.animateToPage(
+          _currentPage,
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 250,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              onPageChanged: (int page) {
+                setState(() {
+                  _currentPage = page;
+                });
+              },
+              itemCount: widget.items.length,
+              itemBuilder: (context, index) {
+                final item = widget.items[index];
+                return _buildBannerItem(item);
+              },
+            ),
+            // Page Indicators
+            Positioned(
+              bottom: 16,
+              right: 24,
+              child: Row(
+                children: List.generate(
+                  widget.items.length,
+                  (index) => Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: _currentPage == index ? 24 : 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _currentPage == index ? AppColors.primary : Colors.white24,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBannerItem(VodItem item) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Background Image
+        CachedNetworkImage(
+          imageUrl: item.poster,
+          fit: BoxFit.cover,
+          httpHeaders: ApiClient().getStalkerHeaders(),
+          errorWidget: (context, url, error) => Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.surface, AppColors.background],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: const Icon(Icons.movie_filter_rounded, color: Colors.white10, size: 80),
+          ),
+        ),
+        // Gradient Overlay
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                Colors.black.withOpacity(0.9),
+                Colors.black.withOpacity(0.4),
+                Colors.transparent,
+              ],
+              stops: const [0.0, 0.5, 1.0],
+            ),
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Colors.black.withOpacity(0.7),
+                Colors.transparent,
+              ],
+            ),
+          ),
+        ),
+        // Content
+        Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'TRENDING',
+                      style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (item.rating.isNotEmpty)
+                    Row(
+                      children: [
+                        const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                        const SizedBox(width: 4),
+                        Text(
+                          item.rating,
+                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                item.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.5,
+                  height: 1.1,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              if (item.genre.isNotEmpty)
+                Text(
+                  item.genre,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => widget.onWatchNow(item),
+                    icon: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+                    label: const Text('Watch Now'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      elevation: 0,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Trailer not available for this item')),
+                      );
+                    },
+                    icon: const Icon(Icons.movie_outlined, color: Colors.white),
+                    label: const Text('Watch Trailer'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      backgroundColor: Colors.white10,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ContentRow extends StatelessWidget {
+  final String title;
+  final AsyncValue<List<dynamic>> itemsAsync;
+  final Function(dynamic) onTap;
+
+  const _ContentRow({
+    required this.title,
+    required this.itemsAsync,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12, top: 8),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 180,
+          child: itemsAsync.when(
+            data: (items) {
+              if (items.isEmpty) return const SizedBox();
+              return ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  String name = '';
+                  String poster = '';
+                  if (item is VodItem) {
+                    name = item.name;
+                    poster = item.poster;
+                  } else if (item is SeriesItem) {
+                    name = item.name;
+                    poster = item.poster;
+                  }
+
+                  return _HomePosterCard(
+                    title: name,
+                    imageUrl: poster,
+                    onTap: () => onTap(item),
+                  );
+                },
+              );
+            },
+            loading: () => ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 5,
+              separatorBuilder: (_, __) => const SizedBox(width: 14),
+              itemBuilder: (_, __) => Shimmer.fromColors(
+                baseColor: AppColors.surface,
+                highlightColor: AppColors.surfaceLight,
+                child: Container(
+                  width: 110,
+                  height: 160,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+            error: (_, __) => const SizedBox(),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+class _HomePosterCard extends StatefulWidget {
+  final String title;
+  final String imageUrl;
+  final VoidCallback onTap;
+
+  const _HomePosterCard({
+    required this.title,
+    required this.imageUrl,
+    required this.onTap,
+  });
+
+  @override
+  State<_HomePosterCard> createState() => _HomePosterCardState();
+}
+
+class _HomePosterCardState extends State<_HomePosterCard> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (focused) => setState(() => _isFocused = focused),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: _isFocused ? 120 : 110,
+              height: _isFocused ? 170 : 160,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _isFocused ? AppColors.primary : Colors.white10,
+                  width: _isFocused ? 2 : 1,
+                ),
+                boxShadow: [
+                  if (_isFocused)
+                    BoxShadow(
+                      color: AppColors.primary.withOpacity(0.3),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: CachedNetworkImage(
+                  imageUrl: widget.imageUrl,
+                  fit: BoxFit.cover,
+                  httpHeaders: ApiClient().getStalkerHeaders(),
+                  errorWidget: (context, url, error) => Container(
+                    color: AppColors.surface,
+                    child: const Icon(Icons.movie_rounded, color: Colors.white10, size: 40),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LiveChannelCard extends StatefulWidget {
+  final Channel channel;
+  final VoidCallback onTap;
+
+  const _LiveChannelCard({
+    required this.channel,
+    required this.onTap,
+  });
+
+  @override
+  State<_LiveChannelCard> createState() => _LiveChannelCardState();
+}
+
+class _LiveChannelCardState extends State<_LiveChannelCard> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (focused) => setState(() => _isFocused = focused),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 140,
+          height: 100,
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _isFocused ? AppColors.primary : Colors.white10,
+              width: _isFocused ? 2 : 1,
+            ),
+            boxShadow: [
+              if (_isFocused)
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.3),
+                  blurRadius: 12,
+                  spreadRadius: 2,
+                ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (widget.channel.logo.isNotEmpty)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: CachedNetworkImage(
+                      imageUrl: widget.channel.logo,
+                      fit: BoxFit.contain,
+                      httpHeaders: ApiClient().getStalkerHeaders(),
+                      errorWidget: (context, url, error) => const Icon(Icons.tv_rounded, color: Colors.white24, size: 32),
+                    ),
+                  ),
+                )
+              else
+                const Expanded(child: Icon(Icons.tv_rounded, color: Colors.white24, size: 32)),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black26,
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(11),
+                    bottomRight: Radius.circular(11),
+                  ),
+                ),
+                child: Text(
+                  widget.channel.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w500),
                 ),
               ),
             ],

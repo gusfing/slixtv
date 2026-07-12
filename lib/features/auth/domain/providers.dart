@@ -617,13 +617,45 @@ final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
 final tvCategoriesProvider = FutureProvider<List<Category>>((ref) async {
   final authState = ref.watch(authProvider);
   if (!authState.sessionReady) return [];
+  
+  List<Category> list;
   if (authState.authType == 'xtream') {
-    final list = await ref.watch(xtreamApiProvider).getCategories('get_live_categories');
-    return list.where((cat) => cat.title.toLowerCase() != 'all').toList();
+    list = await ref.watch(xtreamApiProvider).getCategories('get_live_categories');
+  } else {
+    final api = ref.watch(stalkerApiProvider);
+    list = await api.getCategories('itv');
   }
-  final api = ref.watch(stalkerApiProvider);
-  final list = await api.getCategories('itv');
-  return list.where((cat) => cat.title.toLowerCase() != 'all').toList();
+
+  // Filter out "All" and "Radio" categories
+  return list.where((cat) {
+    final title = cat.title.toLowerCase();
+    return title != 'all' && 
+           title != 'radio' && 
+           title != 'redio' && 
+           title != 'fm radio';
+  }).toList();
+});
+
+// Radio categories
+final radioCategoriesProvider = FutureProvider<List<Category>>((ref) async {
+  final authState = ref.watch(authProvider);
+  if (!authState.sessionReady) return [];
+  
+  List<Category> list;
+  if (authState.authType == 'xtream') {
+    list = await ref.watch(xtreamApiProvider).getCategories('get_live_categories');
+  } else {
+    final api = ref.watch(stalkerApiProvider);
+    list = await api.getCategories('itv');
+  }
+
+  // Filter FOR "Radio" categories
+  return list.where((cat) {
+    final title = cat.title.toLowerCase();
+    return title == 'radio' || 
+           title == 'redio' || 
+           title == 'fm radio';
+  }).toList();
 });
 
 // All channels

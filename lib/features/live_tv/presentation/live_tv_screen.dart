@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -57,7 +58,9 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
   @override
   void initState() {
     super.initState();
+    WakelockPlus.enable();
     _player = Player();
+    _player?.setVolume(100.0);
     _videoController = VideoController(_player!);
   }
 
@@ -69,6 +72,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
     _sidebarScrollController.dispose();
     _searchController.dispose();
     ref.read(parentalLockProvider.notifier).lockSession();
+    WakelockPlus.disable();
     super.dispose();
   }
 
@@ -315,9 +319,11 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // ─── Left Sidebar: Categories ───
-            Container(
+            if (_selectedChannel == null)
+              Container(
               width: 180,
               decoration: const BoxDecoration(
                 color: Color(0xFF111114),
@@ -489,6 +495,19 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     child: Row(
                       children: [
+                        if (_selectedChannel != null)
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 18),
+                            padding: const EdgeInsets.only(right: 12),
+                            constraints: const BoxConstraints(),
+                            onPressed: () {
+                              setState(() {
+                                _selectedChannel = null;
+                                _isPlayingInline = false;
+                                _player?.stop();
+                              });
+                            },
+                          ),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -513,23 +532,25 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
                         ),
                         const SizedBox(width: 8),
                         // Search channels
-                        SizedBox(
-                          width: 160,
-                          height: 32,
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
-                            style: const TextStyle(color: Colors.white, fontSize: 12),
-                            decoration: InputDecoration(
-                              hintText: 'Search...',
-                              hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
-                              prefixIcon: const Icon(Icons.search_rounded, color: Colors.white38, size: 16),
-                              filled: true,
-                              fillColor: AppColors.surface,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide.none,
+                        Flexible(
+                          child: SizedBox(
+                            width: 160,
+                            height: 32,
+                            child: TextField(
+                              controller: _searchController,
+                              onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
+                              style: const TextStyle(color: Colors.white, fontSize: 12),
+                              decoration: InputDecoration(
+                                hintText: 'Search...',
+                                hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                                prefixIcon: const Icon(Icons.search_rounded, color: Colors.white38, size: 16),
+                                filled: true,
+                                fillColor: AppColors.surface,
+                                contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  borderSide: BorderSide.none,
+                                ),
                               ),
                             ),
                           ),
@@ -601,7 +622,11 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
             if (_selectedChannel != null)
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
-                width: MediaQuery.of(context).size.width * 0.5,
+                width: _isRightPanelCollapsed
+                    ? 60
+                    : (MediaQuery.of(context).size.width > 900
+                        ? MediaQuery.of(context).size.width * 0.4
+                        : MediaQuery.of(context).size.width * 0.45),
                 margin: const EdgeInsets.only(right: 8, bottom: 8, top: 4),
                 decoration: BoxDecoration(
                   color: AppColors.surface,
@@ -613,14 +638,15 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
                   children: [
                     if (!_isRightPanelCollapsed) ...[
                       // Inline Video Player container
-                      AspectRatio(
-                        aspectRatio: 16 / 9,
-                        child: ClipRRect(
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(11),
-                            topRight: Radius.circular(11),
-                          ),
-                          child: Container(
+                      Flexible(
+                        child: AspectRatio(
+                          aspectRatio: 16 / 9,
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(11),
+                              topRight: Radius.circular(11),
+                            ),
+                            child: Container(
                             color: Colors.black,
                             child: Stack(
                               fit: StackFit.expand,
@@ -661,6 +687,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
                             ),
                           ),
                         ),
+                      ),
                       ),
 
                       // Selected Channel Title bar with program info

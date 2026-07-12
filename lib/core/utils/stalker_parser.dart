@@ -125,7 +125,14 @@ class PosterResolver {
 
     if (rawPoster.isEmpty) return '';
 
-    return client.resolveUrl(rawPoster);
+    String url = client.resolveUrl(rawPoster);
+    url = url.trim().replaceAll('\\', '/');
+    try {
+      url = Uri.encodeFull(url);
+    } catch (e) {
+      // ignore
+    }
+    return url;
   }
 }
 

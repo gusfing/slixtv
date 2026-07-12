@@ -240,7 +240,7 @@ class XtreamApiService {
             id: streamId,
             name: name,
             description: map['plot']?.toString() ?? '',
-            poster: streamIcon,
+            poster: _processUrl(streamIcon),
             cmd: '$_portalUrl/movie/$_username/$_password/$streamId.$containerExt',
             categoryId: map['category_id']?.toString() ?? '',
             year: map['year']?.toString() ?? '',
@@ -299,7 +299,7 @@ class XtreamApiService {
             id: seriesId,
             name: name,
             description: map['plot']?.toString() ?? '',
-            poster: cover,
+            poster: _processUrl(cover),
             categoryId: map['category_id']?.toString() ?? '',
             year: map['releaseDate']?.toString() ?? '',
             rating: map['rating']?.toString() ?? '',
@@ -365,7 +365,7 @@ class XtreamApiService {
               cmd: streamUrl,
               episodeNumber: int.tryParse(epJson['episode_num']?.toString() ?? '') ?? (i + 1),
               duration: infoJson?['duration']?.toString() ?? '',
-              poster: infoJson?['movie_image']?.toString() ?? '',
+              poster: _processUrl(infoJson?['movie_image']?.toString() ?? ''),
               description: infoJson?['plot']?.toString() ?? '',
             ));
           }
@@ -455,6 +455,15 @@ class XtreamApiService {
       _logger.e('XTREAM', 'Failed to load full EPG for streamId=$streamId, falling back to short EPG', error: e);
       // Fallback to short EPG on error
       return getEPG(streamId);
+    }
+  }
+  String _processUrl(String? url) {
+    if (url == null || url.isEmpty) return '';
+    try {
+      if (!url.startsWith('http')) return url;
+      return Uri.encodeFull(url.replaceAll(r'\', '/'));
+    } catch (_) {
+      return url;
     }
   }
 }
