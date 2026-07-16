@@ -627,13 +627,13 @@ final tvCategoriesProvider = FutureProvider<List<Category>>((ref) async {
   }
 
   // Filter out "All" and "Radio" categories
-  return list.where((cat) {
+  return sortCategoriesByLanguage(list.where((cat) {
     final title = cat.title.toLowerCase();
     return title != 'all' && 
            title != 'radio' && 
            title != 'redio' && 
            title != 'fm radio';
-  }).toList();
+  }).toList());
 });
 
 // Radio categories

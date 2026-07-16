@@ -160,9 +160,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       body: Stack(
         children: [
           if (_videoController != null)
-            Video(
-              controller: _videoController!,
-              controls: MaterialVideoControls,
+            MaterialDesktopVideoControlsTheme(
+              normal: const MaterialDesktopVideoControlsThemeData(
+                hideMouseOnLeave: false,
+              ),
+              fullscreen: const MaterialDesktopVideoControlsThemeData(
+                hideMouseOnLeave: false,
+              ),
+              child: Video(
+                controller: _videoController!,
+                controls: MaterialDesktopVideoControls,
+              ),
             )
           else
             const Center(child: CircularProgressIndicator(color: AppColors.primary)),
